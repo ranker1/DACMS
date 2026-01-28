@@ -4,6 +4,7 @@ import RegisterCase from './RegisterCase'
 import EvidenceSection from './EvidenceSection'
 import Login from './Login'
 import ReportForm from './ReportForm'
+import RegisterUser from './RegisterUser' // <--- Import the new Admin Component
 
 function App() {
   // 1. Get Token AND Role from storage
@@ -62,7 +63,6 @@ function App() {
   };
 
   // 1. LOGIN SCREEN
-  // We now accept (t, r) -> Token and Role
   if (!token) {
       return <Login onLoginSuccess={(t, r) => { setToken(t); setRole(r); }} />
   }
@@ -75,14 +75,20 @@ function App() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <div>
             <h1 style={{margin: 0}}>🏥 DACMS Dashboard</h1>
-            <span style={{fontSize: '0.8em', color: '#888'}}>Logged in as: {role}</span>
+            <span style={{fontSize: '0.8em', color: '#888'}}>Logged in as: <strong>{role}</strong></span>
           </div>
           <button onClick={handleLogout} style={{ padding: '8px 15px', background: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
             Logout
           </button>
       </div>
+
+      {/* --- ADMIN ZONE: CREATE USERS --- */}
+      {/* Only show this if the user is an ADMIN */}
+      {role === 'ADMIN' && (
+          <RegisterUser />
+      )}
       
-      {/* REGISTER FORM (Visible to Everyone) */}
+      {/* REGISTER CASE FORM (Visible to Everyone) */}
       <RegisterCase onCaseAdded={fetchCases} />
 
       <hr style={{ margin: '30px 0' }}/>

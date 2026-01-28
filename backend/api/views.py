@@ -6,6 +6,9 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.utils import timezone
 from rest_framework import viewsets, permissions
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
 from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.authtoken.models import Token
 from rest_framework.response import Response
@@ -129,3 +132,29 @@ class CustomLoginView(ObtainAuthToken):
             'username': user.username,
             'role': user.role  # <--- This is the golden ticket
         })
+    
+
+class RegisterUserView(APIView):
+    def post(self, request):
+        # 1. Security Check: Only Admins can create users
+        if not request.user.is_superuser and request.user.role != 'ADMIN':
+            return Response({'error': 'Unauthorized'}, status=status.HTTP_403_FORBIDDEN)
+
+        # 2. Get Data
+        username = request.data.get('username')
+        password = request.data.get('password')
+        role = request.data.get('role')
+
+        # 3. Validation
+        if not username or not password or not role:
+            return Response({'error': 'All fields are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if CustomUser.objects.filter(username=username).exists():
+            return Response({'error': 'Username already exists'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 4. Create User
+        try:
+            user = CustomUser.objects.create_user(username=username, password=password, role=role)
+            return Response({'message': f'User {username} created successfully!'}, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
