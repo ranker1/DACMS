@@ -1,79 +1,80 @@
 import { useState } from 'react'
 import axios from 'axios'
+import { useNavigate } from 'react-router-dom'
 
 function Login({ onLoginSuccess }) {
     const [username, setUsername] = useState('')
     const [password, setPassword] = useState('')
     const [error, setError] = useState('')
+    const navigate = useNavigate()
 
-    const handleLogin = async (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault()
+        setError('') // Clear previous errors
+        
         try {
-        const response = await axios.post('http://127.0.0.1:8000/api/login/', {
-            username: username,
-            password: password
-        })
-        // Save Token AND Role
-        localStorage.setItem('token', response.data.token)
-        localStorage.setItem('role', response.data.role) // <--- NEW
+            // 1. Send credentials to Backend
+            const res = await axios.post('http://127.0.0.1:8000/api/login/', {
+                username: username,
+                password: password
+            })
 
-        // Pass both to the parent
-        onLoginSuccess(response.data.token, response.data.role)
-    } catch (err) {
-            console.error(err)
-            setError('Invalid Credentials')
+            console.log("Server Response:", res.data) // Debugging
+
+            // 2. Extract the Data (Match exactly what your screenshot showed)
+            const { token, role } = res.data
+
+            // 3. CRITICAL: Save to Local Storage
+            if (token) {
+                localStorage.setItem('token', token) 
+                localStorage.setItem('role', role)
+                
+                // 4. Update App State
+                if (onLoginSuccess) {
+                    onLoginSuccess(token, role)
+                }
+                
+                // 5. Go to Dashboard
+                navigate('/') 
+            } else {
+                setError("Login failed: No token received from server.")
+            }
+
+        } catch (err) {
+            console.error("Login Error:", err)
+            setError('Invalid credentials or Server Error')
         }
     }
 
     return (
-        <div style={{ 
-            height: '100vh', 
-            display: 'flex', 
-            justifyContent: 'center', 
-            alignItems: 'center', 
-            background: '#f0f2f5' 
-        }}>
-            <form onSubmit={handleLogin} style={{ 
-                background: 'white', 
-                padding: '40px', 
-                borderRadius: '8px', 
-                boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                display: 'flex', 
-                flexDirection: 'column', 
-                width: '300px',
-                gap: '15px'
-            }}>
-                <h2 style={{ textAlign: 'center', margin: '0 0 20px 0', color: '#333' }}>🔐 DACMS Login</h2>
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: '50px' }}>
+            <div style={{ padding: '30px', border: '1px solid #ccc', borderRadius: '8px', boxShadow: '0 4px 8px rgba(0,0,0,0.1)', background: 'white' }}>
+                <h2 style={{ textAlign: 'center', color: '#333' }}>🔐 DACMS Login</h2>
                 
-                {error && <div style={{ color: 'red', fontSize: '0.9em', textAlign: 'center' }}>{error}</div>}
-
-                <input 
-                    type="text" 
-                    placeholder="Username" 
-                    value={username} 
-                    onChange={e => setUsername(e.target.value)}
-                    style={{ padding: '10px', border: '1px solid #ccc', borderRadius: '4px' }}
-                />
-                <input 
-                    type="password" 
-                    placeholder="Password" 
-                    value={password} 
-                    onChange={e => setPassword(e.target.value)}
-                    style={{ padding: '10px', border: '1px solid #ccc', borderRadius: '4px' }}
-                />
+                {error && <p style={{ color: 'red', textAlign: 'center' }}>{error}</p>}
                 
-                <button type="submit" style={{ 
-                    padding: '12px', 
-                    background: '#007bff', 
-                    color: 'white', 
-                    border: 'none', 
-                    borderRadius: '4px', 
-                    cursor: 'pointer',
-                    fontWeight: 'bold'
-                }}>
-                    Login
-                </button>
-            </form>
+                <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '15px', width: '300px' }}>
+                    <input 
+                        type="text" 
+                        placeholder="Username" 
+                        value={username} 
+                        onChange={(e) => setUsername(e.target.value)}
+                        required
+                        style={{ padding: '10px', fontSize: '16px' }}
+                    />
+                    <input 
+                        type="password" 
+                        placeholder="Password" 
+                        value={password} 
+                        onChange={(e) => setPassword(e.target.value)}
+                        required
+                        style={{ padding: '10px', fontSize: '16px' }}
+                    />
+                    <button type="submit" style={{ padding: '10px', background: '#007bff', color: 'white', border: 'none', cursor: 'pointer', fontSize: '16px', borderRadius: '4px' }}>
+                        Login
+                    </button>
+                </form>
+            </div>
         </div>
     )
 }

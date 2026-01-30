@@ -1,3 +1,8 @@
+import os
+from django.conf import settings
+from reportlab.lib.colors import red, black, white
+from reportlab.lib.utils import ImageReader
+from .models import AutopsyCase
 from django.http import HttpResponse
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
@@ -158,3 +163,318 @@ class RegisterUserView(APIView):
             return Response({'message': f'User {username} created successfully!'}, status=status.HTTP_201_CREATED)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+def generate_pdf(request, case_id):
+    # --- 1. GET THE CASE ---
+    try:
+        case = AutopsyCase.objects.get(pk=case_id)
+    except (AutopsyCase.DoesNotExist, ValueError):
+        try:
+            case = AutopsyCase.objects.get(case_id=case_id)
+        except AutopsyCase.DoesNotExist:
+            return HttpResponse("Case not found", status=404)
+
+    # --- 2. SETUP PDF ---
+    response = HttpResponse(content_type='application/pdf')
+    filename = f"{case.case_id}_Full_Report.pdf"
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    
+    p = canvas.Canvas(response)
+    p.setTitle(f"Forensic Autopsy - {case.case_id}")
+
+    # Helper: Safe Text
+    def get_text(val, default="N/A"):
+        return str(val) if val else default
+
+    # Helper: Draw Header on Every Page
+    def draw_header(title, is_first_page=False):
+        p.setFillColor(black)
+        
+        # Main Title
+        p.setFont("Helvetica-Bold", 16)
+        p.drawString(50, 800, f"OFFICIAL AUTOPSY REPORT: {case.case_id}")
+        
+        p.setFont("Helvetica-Bold", 10)
+        p.drawString(50, 785, "CONFIDENTIAL - FORENSIC PATHOLOGY UNIT")
+        p.line(50, 780, 550, 780)
+        
+        # Section Title (Top Right)
+        if not is_first_page:
+            p.setFont("Helvetica-Oblique", 12)
+            p.drawRightString(550, 785, title)
+        
+        # QR Code (Only on First Page)
+        if is_first_page and case.qr_code_image:
+            try:
+                qr_path = case.qr_code_image.path 
+                if os.path.exists(qr_path):
+                    # Draw QR Code at Top Right (x=480, y=735)
+                    p.drawImage(ImageReader(qr_path), 480, 735, width=65, height=65)
+                    p.setFont("Helvetica", 6)
+                    p.drawCentredString(512, 730, "SCAN TO VERIFY")
+            except: pass
+
+    # ================= PAGE 1: IDENTIFICATION & HISTORY =================
+    draw_header("Identification", is_first_page=True) # <--- Enable QR Here
+
+    p.setFont("Helvetica-Bold", 12)
+    p.drawString(50, 750, "1. DECEDENT DEMOGRAPHICS")
+    p.setFont("Helvetica", 10)
+    
+    # Column 1
+    p.drawString(50, 730, f"Name: {get_text(case.deceased_name)}")
+    p.drawString(50, 715, f"Age: {get_text(case.age)}")
+    p.drawString(50, 700, f"Sex: {get_text(case.gender)}")
+    p.drawString(50, 685, f"Race: {get_text(case.race)}")
+    
+    # Column 2 (Moved left slightly to avoid hitting QR code)
+    p.drawString(280, 730, f"Date of Birth: {get_text(case.date_of_birth)}")
+    p.drawString(280, 715, f"Date of Arrival: {case.date_of_arrival.strftime('%Y-%m-%d')}")
+    p.drawString(280, 700, f"Place of Death: {get_text(case.place_of_death)}")
+    p.drawString(280, 685, f"Time of Death: {get_text(case.time_of_death)}")
+
+    # Identification
+    p.line(50, 665, 550, 665)
+    p.setFont("Helvetica-Bold", 12)
+    p.drawString(50, 650, "2. IDENTIFICATION")
+    p.setFont("Helvetica", 10)
+    p.drawString(50, 630, f"Method: {get_text(case.identification_method)}")
+    p.drawString(50, 615, f"Notes: {get_text(case.identification_notes)}")
+
+    # Historical Summary
+    p.line(50, 595, 550, 595)
+    p.setFont("Helvetica-Bold", 12)
+    p.drawString(50, 580, "3. HISTORICAL SUMMARY")
+    p.setFont("Helvetica", 10)
+    
+    p.drawString(50, 560, "Circumstances of Death (Police/Scene):")
+    text_obj = p.beginText(60, 545)
+    text_obj.setFont("Helvetica", 9)
+    # Simple wrapping for long text
+    for line in get_text(case.circumstances_of_death, "No details provided.").split('\n'):
+        text_obj.textLine(line)
+    p.drawText(text_obj)
+    
+    p.drawString(50, 480, "Medical History:")
+    p.drawString(60, 465, get_text(case.medical_history, "Unknown"))
+
+    p.showPage()
+
+    # ================= PAGE 2: EXTERNAL EXAMINATION =================
+    draw_header("Page 2: External Exam")
+    
+    # Need access to the linked Report for details
+    try:
+        report = case.report
+    except:
+        report = None
+
+    p.setFont("Helvetica-Bold", 12)
+    p.drawString(50, 750, "4. GENERAL EXTERNAL EXAMINATION")
+    p.setFont("Helvetica", 10)
+    
+    if report:
+        p.drawString(50, 730, f"Height: {get_text(report.height_cm)} cm   Weight: {get_text(report.weight_kg)} kg")
+        p.drawString(50, 715, f"Body Habitus: {get_text(report.body_habitus)}")
+        p.drawString(50, 700, f"Nutrition Notes: {get_text(report.nutrition_notes)}")
+        
+        p.drawString(300, 730, f"Hair Color: {get_text(report.hair_color)}")
+        p.drawString(300, 715, f"Eye Color: {get_text(report.eye_color)}")
+        p.drawString(300, 700, f"Dentition: {get_text(report.dentition_status)}")
+        
+        p.drawString(50, 670, f"Rigor Mortis: {get_text(report.rigor_mortis)}")
+        p.drawString(50, 655, f"Livor Mortis: {get_text(report.livor_mortis)}")
+        p.drawString(50, 640, f"Decomposition: {get_text(report.decomposition_changes)}")
+
+        p.setFont("Helvetica-Bold", 10)
+        p.drawString(50, 610, "Clothing & Personal Effects:")
+        p.setFont("Helvetica", 9)
+        p.drawString(60, 595, get_text(report.clothing_description))
+        p.drawString(60, 580, get_text(report.personal_effects))
+
+        p.setFont("Helvetica-Bold", 10)
+        p.drawString(50, 550, "Medical Interventions / Scars:")
+        p.setFont("Helvetica", 9)
+        p.drawString(60, 535, get_text(report.medical_interventions))
+        p.drawString(60, 520, get_text(report.scars_tattoos))
+    else:
+        p.drawString(50, 700, "Detailed External Report Data Not Yet Entered.")
+
+    # Injury List
+    p.line(50, 490, 550, 490)
+    p.setFont("Helvetica-Bold", 12)
+    p.drawString(50, 475, "5. EVIDENCE OF INJURY (Text Description)")
+    
+    y = 455
+    p.setFont("Helvetica", 9)
+    if case.external_injuries:
+        for line in case.external_injuries.split('\n'):
+            p.drawString(50, y, line)
+            y -= 12
+            if y < 50: 
+                p.showPage()
+                draw_header("Page 2 (Cont): Injuries")
+                y = 750
+    else:
+        p.drawString(50, y, "No injuries recorded.")
+
+    p.showPage()
+
+    # ================= PAGE 3: VISUAL BODY MAP =================
+    draw_header("Page 3: Body Map")
+    p.setFont("Helvetica-Bold", 12)
+    p.drawString(50, 750, "6. VISUAL INJURY DIAGRAM")
+
+    if case.body_map_data and isinstance(case.body_map_data, list):
+        markers = case.body_map_data
+        used_views = set(m.get('view') for m in markers)
+        current_y = 700 
+        base_path = os.path.join(settings.BASE_DIR, 'assets') 
+
+        for view in used_views:
+            image_filename = f"{view.lower()}.png"
+            image_path = os.path.join(base_path, image_filename)
+
+            if os.path.exists(image_path):
+                img = ImageReader(image_path)
+                orig_w, orig_h = img.getSize()
+                target_width = 300
+                aspect_ratio = orig_h / orig_w
+                target_height = target_width * aspect_ratio
+
+                if current_y - target_height < 50:
+                    p.showPage()
+                    draw_header("Page 3 (Cont): Body Map")
+                    current_y = 750
+
+                p.setFont("Helvetica-Bold", 10)
+                p.drawString(50, current_y + 10, f"DIAGRAM: {view}")
+                draw_y = current_y - target_height
+                p.drawImage(img, 100, draw_y, width=target_width, height=target_height, mask='auto')
+
+                for i, m in enumerate(markers):
+                    if m.get('view') == view:
+                        rel_x = (m['x'] / 100) * target_width
+                        rel_y = ((100 - m['y']) / 100) * target_height
+                        
+                        abs_x = 100 + rel_x
+                        abs_y = draw_y + rel_y
+                        
+                        p.setFillColor(red)
+                        p.circle(abs_x, abs_y, 5, stroke=0, fill=1)
+                        p.setFillColor(white)
+                        p.setFont("Helvetica-Bold", 7)
+                        p.drawCentredString(abs_x, abs_y - 2.5, str(i + 1))
+
+                current_y = draw_y - 50 
+                p.setFillColor(black)
+    else:
+        p.drawString(50, 700, "No visual map data available.")
+
+    p.showPage()
+
+    # ================= PAGE 4: INTERNAL EXAMINATION =================
+    draw_header("Page 4: Internal Exam")
+    p.setFont("Helvetica-Bold", 12)
+    p.drawString(50, 750, "7. INTERNAL EXAMINATION")
+    
+    if report:
+        p.setFont("Helvetica-Bold", 10)
+        p.drawString(50, 730, "Organ Weights (grams):")
+        p.setFont("Helvetica", 10)
+        
+        # Grid layout for weights
+        row1_y = 715
+        p.drawString(50, row1_y, f"Brain: {get_text(report.brain_weight)}")
+        p.drawString(200, row1_y, f"Heart: {get_text(report.heart_weight)}")
+        p.drawString(350, row1_y, f"Liver: {get_text(report.liver_weight)}")
+        
+        row2_y = 700
+        p.drawString(50, row2_y, f"R. Lung: {get_text(report.lung_right_weight)}")
+        p.drawString(200, row2_y, f"L. Lung: {get_text(report.lung_left_weight)}")
+        p.drawString(350, row2_y, f"Spleen: {get_text(report.spleen_weight)}")
+        
+        row3_y = 685
+        p.drawString(50, row3_y, f"R. Kidney: {get_text(report.kidney_right_weight)}")
+        p.drawString(200, row3_y, f"L. Kidney: {get_text(report.kidney_left_weight)}")
+
+        p.line(50, 670, 550, 670)
+        
+        # System Descriptions
+        y = 650
+        systems = [
+            ("Technique", report.evisceration_technique),
+            ("Cardiovascular", report.heart_findings),
+            ("Respiratory", report.lung_findings),
+            ("Digestive", report.stomach_contents),
+            ("Hepatobiliary", report.liver_findings),
+            ("Genitourinary", report.genitalia_findings),
+            ("Endocrine", report.endocrine_findings),
+            ("Musculoskeletal", report.musculoskeletal_findings),
+            ("Neck", report.neck_findings),
+        ]
+        
+        for title, content in systems:
+            if y < 100:
+                p.showPage()
+                draw_header("Page 4 (Cont): Internal")
+                y = 750
+            
+            p.setFont("Helvetica-Bold", 10)
+            p.drawString(50, y, f"{title}:")
+            p.setFont("Helvetica", 9)
+            # Simple manual wrapping
+            content_text = get_text(content, "Unremarkable.")
+            if len(content_text) > 90:
+                p.drawString(130, y, content_text[:90] + "...")
+                p.drawString(130, y-12, content_text[90:])
+                y -= 25
+            else:
+                p.drawString(130, y, content_text)
+                y -= 15
+    else:
+        p.drawString(50, 700, "Internal Exam Data Not Yet Entered.")
+
+    p.showPage()
+
+    # ================= PAGE 5: LABS & OPINION =================
+    draw_header("Page 5: Summary")
+    
+    if report:
+        p.setFont("Helvetica-Bold", 12)
+        p.drawString(50, 750, "8. ANCILLARY STUDIES")
+        p.setFont("Helvetica", 10)
+        
+        p.drawString(50, 730, f"Toxicology: {get_text(report.toxicology_results)}")
+        p.drawString(50, 715, f"Histology: {get_text(report.histology_results)}")
+        p.drawString(50, 700, f"Microbiology: {get_text(report.microbiology_results)}")
+        p.drawString(50, 685, f"Imaging: {get_text(report.postmortem_imaging)}")
+        
+        p.line(50, 665, 550, 665)
+        p.setFont("Helvetica-Bold", 12)
+        p.drawString(50, 650, "9. EVIDENCE DISPOSITION")
+        p.setFont("Helvetica", 10)
+        p.drawString(50, 635, get_text(report.evidence_disposition, "No evidence retained."))
+
+        p.line(50, 615, 550, 615)
+        p.setFont("Helvetica-Bold", 12)
+        p.drawString(50, 600, "10. CAUSE & MANNER OF DEATH")
+        
+        p.setFont("Helvetica-Bold", 11)
+        p.drawString(50, 570, f"MANNER: {get_text(report.manner_of_death)}")
+        p.drawString(50, 550, f"CAUSE: {get_text(report.cause_of_death)}")
+        
+        p.setFont("Helvetica", 10)
+        p.drawString(50, 520, "FINAL SUMMARY / OPINION:")
+        
+        text_obj = p.beginText(50, 500)
+        for line in get_text(report.final_summary).split('\n'):
+            text_obj.textLine(line)
+        p.drawText(text_obj)
+
+    # Footer
+    p.setFont("Helvetica-Oblique", 8)
+    p.drawString(50, 30, f"Generated by DACMS Forensic System - {case.date_of_arrival.strftime('%Y')}")
+    
+    p.save()
+    return response

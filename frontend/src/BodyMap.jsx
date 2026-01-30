@@ -1,0 +1,170 @@
+import { useState, useEffect } from 'react'
+
+function BodyMap({ existingData, gender, age, onSave }) {
+    // 1. All Possible Diagrams (ADDED CRANIAL HERE)
+    const allDiagrams = {
+        MALE: '/diagrams/male.png',
+        FEMALE: '/diagrams/female.png',
+        INFANT: '/diagrams/infant.png',
+        HEAD: '/diagrams/head.png',
+        CRANIAL: '/diagrams/cranial.png', // <--- FIXED: Added path
+        TRAUMA: '/diagrams/trauma.png' 
+    }
+
+    // 2. Injury Palette
+    const injuryTypes = {
+        LACERATION: { color: '#dc3545', label: 'Laceration (Cut)', code: 'LAC' },   
+        CONTUSION:  { color: '#6610f2', label: 'Contusion (Bruise)', code: 'CONT' }, 
+        ABRASION:   { color: '#fd7e14', label: 'Abrasion (Scrape)', code: 'ABR' },   
+        GSW:        { color: '#000000', label: 'Gunshot Wound', code: 'GSW' },       
+        FRACTURE:   { color: '#28a745', label: 'Fracture', code: 'FX' },             
+        SURGICAL:   { color: '#0dcaf0', label: 'Surgical/Scar', code: 'SURG' }       
+    }
+
+    const [availableViews, setAvailableViews] = useState([])
+    const [currentView, setCurrentView] = useState('HEAD') 
+    const [selectedTool, setSelectedTool] = useState('LACERATION') 
+    const [markers, setMarkers] = useState([])
+
+    // --- SMART ALLOCATION LOGIC ---
+    useEffect(() => {
+        // 1. Start with diagrams available to EVERYONE (ADDED CRANIAL HERE)
+        let views = ['HEAD', 'CRANIAL', 'TRAUMA']
+
+        // 2. Add Specific Body Type
+        if (age !== null && age < 3) {
+            // It is an infant (0-2 years)
+            views.unshift('INFANT')
+        } else {
+            // It is an adult/child
+            if (gender === 'F') {
+                views.unshift('FEMALE')
+            } else {
+                // Default to Male for 'M' or Unknown
+                views.unshift('MALE')
+            }
+        }
+
+        setAvailableViews(views)
+        
+        // Auto-select the main body view if current is invalid
+        if (!views.includes(currentView)) {
+            setCurrentView(views[0])
+        }
+    }, [gender, age])
+
+    // --- Load Existing Data ---
+    useEffect(() => {
+        if (existingData && Array.isArray(existingData)) {
+            setMarkers(existingData)
+        }
+    }, [existingData])
+
+    // --- CLICK HANDLER ---
+    const handleMapClick = (e) => {
+        const rect = e.target.getBoundingClientRect()
+        const xPercent = ((e.clientX - rect.left) / rect.width) * 100
+        const yPercent = ((e.clientY - rect.top) / rect.height) * 100
+        
+        const tool = injuryTypes[selectedTool]
+        const details = window.prompt(`Describe this ${tool.label}:`)
+        
+        if (details !== null) { 
+            setMarkers([...markers, { 
+                x: xPercent, 
+                y: yPercent, 
+                view: currentView,
+                type: selectedTool, 
+                description: details || 'Unspecified',
+                color: tool.color
+            }])
+        }
+    }
+
+    // --- CORRECTION TOOLS ---
+    const undoLast = () => { if (markers.length > 0) setMarkers(markers.slice(0, -1)) }
+    const clearAll = () => { if (window.confirm("Clear ALL injuries?")) setMarkers([]) }
+    const removeSpecific = (index) => { if(window.confirm("Remove injury?")) setMarkers(markers.filter((_, i) => i !== index)) }
+
+    const handleSave = () => {
+        const textReport = markers.map((m, i) => 
+            `${i+1}. [${m.view}] ${injuryTypes[m.type].label}: ${m.description}`
+        ).join('\n')
+        onSave(textReport, markers)
+    }
+
+    return (
+        <div style={{ textAlign: 'center' }}>
+            
+            {/* DYNAMIC VIEW SELECTOR */}
+            <div style={{ marginBottom: '15px', display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                {availableViews.map(key => (
+                    <button key={key} onClick={() => setCurrentView(key)} style={{ padding: '8px 15px', cursor: 'pointer', background: currentView === key ? '#343a40' : '#f8f9fa', color: currentView === key ? 'white' : 'black', border: '1px solid #ccc', borderRadius: '4px', fontWeight: 'bold' }}>
+                        {key}
+                    </button>
+                ))}
+            </div>
+
+            {/* INJURY PALETTE */}
+            <div style={{ marginBottom: '10px', padding: '10px', background: '#f1f1f1', borderRadius: '8px', display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                {Object.keys(injuryTypes).map(key => (
+                    <button key={key} onClick={() => setSelectedTool(key)} style={{ padding: '6px 12px', cursor: 'pointer', background: selectedTool === key ? 'white' : 'transparent', color: 'black', border: selectedTool === key ? `2px solid ${injuryTypes[key].color}` : '1px solid transparent', boxShadow: selectedTool === key ? '0 2px 5px rgba(0,0,0,0.1)' : 'none', borderRadius: '20px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: injuryTypes[key].color }}></span>
+                        {injuryTypes[key].label}
+                    </button>
+                ))}
+            </div>
+
+            {/* TOOLBAR */}
+            <div style={{ marginBottom: '10px', display: 'flex', justifyContent: 'center', gap: '20px' }}>
+                <button onClick={undoLast} disabled={markers.length === 0} style={{ padding: '5px 15px', cursor: 'pointer', background: '#ffc107', border: '1px solid #d39e00', borderRadius: '4px' }}>↩ Undo Last</button>
+                <button onClick={clearAll} disabled={markers.length === 0} style={{ padding: '5px 15px', cursor: 'pointer', background: '#dc3545', color: 'white', border: '1px solid #a71d2a', borderRadius: '4px' }}>🗑️ Clear All</button>
+            </div>
+
+            {/* WORKSPACE */}
+            <div style={{ position: 'relative', display: 'inline-block', border: '4px solid #333', background: 'white', boxShadow: '0 5px 15px rgba(0,0,0,0.3)' }}>
+                {/* Check if image exists before rendering */}
+                {allDiagrams[currentView] && (
+                    <img src={allDiagrams[currentView]} alt="Body Map" onClick={handleMapClick} style={{ maxWidth: '100%', maxHeight: '600px', display: 'block', cursor: 'crosshair' }} />
+                )}
+                
+                {markers.filter(m => m.view === currentView).map((m, i) => {
+                    const globalIndex = markers.indexOf(m)
+                    return (
+                        <div key={i} onClick={(e) => { e.stopPropagation(); removeSpecific(globalIndex); }} title={`${injuryTypes[m.type].label}: ${m.description}`} style={{ position: 'absolute', left: `${m.x}%`, top: `${m.y}%`, width: '20px', height: '20px', background: m.color, borderRadius: '50%', border: '2px solid white', cursor: 'pointer', transform: 'translate(-50%, -50%)', boxShadow: '0 2px 4px rgba(0,0,0,0.5)', color: 'white', fontSize: '10px', fontWeight: 'bold', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                            {globalIndex + 1}
+                        </div>
+                    )
+                })}
+            </div>
+
+            {/* INJURY LIST */}
+            <div style={{ marginTop: '20px', maxWidth: '700px', margin: '20px auto', textAlign: 'left' }}>
+                <h4>🩹 Recorded Injuries:</h4>
+                <ul style={{ background: '#fff', padding: '15px', borderRadius: '8px', border: '1px solid #ddd', maxHeight: '200px', overflowY: 'auto' }}>
+                    {markers.length === 0 ? <li style={{color:'#ccc'}}>No injuries marked yet.</li> : 
+                        markers.map((m, i) => (
+                            <li key={i} style={{ marginBottom: '8px', borderBottom: '1px solid #eee', paddingBottom: '4px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <span style={{ background: m.color, color: 'white', padding: '2px 6px', borderRadius: '4px', fontSize: '0.8em', fontWeight: 'bold' }}>
+                                    {i + 1}
+                                </span>
+                                <strong>[{m.view}]</strong> 
+                                <span style={{ color: m.color, fontWeight: 'bold' }}>
+                                    {injuryTypes[m.type] ? injuryTypes[m.type].label : m.type}
+                                </span>: 
+                                {m.description}
+                                <button onClick={() => removeSpecific(i)} style={{ marginLeft: 'auto', color: 'red', border: 'none', background: 'none', cursor: 'pointer' }}>✕</button>
+                            </li>
+                        ))
+                    }
+                </ul>
+
+                <button onClick={handleSave} style={{ width: '100%', padding: '15px', background: '#28a745', color: 'white', fontSize: '18px', fontWeight: 'bold', border: 'none', borderRadius: '5px', cursor: 'pointer', marginTop: '10px' }}>
+                    💾 Save & Generate Report
+                </button>
+            </div>
+        </div>
+    )
+}
+
+export default BodyMap
