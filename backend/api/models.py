@@ -160,7 +160,7 @@ class AutopsyReport(models.Model):
     postmortem_imaging = models.TextField(blank=True, help_text="X-Ray / CT Scan findings")
 
     # --- 5. CONCLUSION & EVIDENCE ---
-    cause_of_death = models.TextField()
+    cause_of_death = models.TextField(blank=True)
     manner_of_death = models.CharField(max_length=20, choices=MANNERS_OF_DEATH, default='UNDETERMINED')
     final_summary = models.TextField(blank=True)
     

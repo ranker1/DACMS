@@ -20,6 +20,11 @@ from rest_framework.response import Response
 from .models import CustomUser, AutopsyCase, Evidence, AutopsyReport
 from .serializers import UserSerializer, AutopsyCaseSerializer, EvidenceSerializer, ReportSerializer
 
+# Custom Permission
+class IsPathologistOrAdmin(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return request.user.is_authenticated and (request.user.role in ['PATHOLOGIST', 'ADMIN'])
+
 # 1. User ViewSet
 class UserViewSet(viewsets.ModelViewSet):
     queryset = CustomUser.objects.all()
@@ -95,7 +100,7 @@ class AutopsyCaseViewSet(viewsets.ModelViewSet):
             # Simple text wrapping for long notes
             text = p.beginText(50, y)
             text.setFont("Helvetica", 10)
-            text.textLines(report.details)
+            text.textLines(report.final_summary or "No summary available")
             p.drawText(text)
         else:
             # If no report exists yet
@@ -123,6 +128,16 @@ class EvidenceViewSet(viewsets.ModelViewSet):
 class ReportViewSet(viewsets.ModelViewSet):
     queryset = AutopsyReport.objects.all()
     serializer_class = ReportSerializer
+
+    def get_permissions(self):
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [permissions.IsAuthenticated(), IsPathologistOrAdmin()]
+        return [permissions.IsAuthenticated()]
+
+    def perform_create(self, serializer):
+        case_id = self.request.data.get('case_id')
+        case = AutopsyCase.objects.get(pk=case_id)
+        serializer.save(case=case, pathologist=self.request.user)
 
 # Custom Login View that returns the Role
 class CustomLoginView(ObtainAuthToken):
@@ -325,10 +340,11 @@ def generate_pdf(request, case_id):
     p.setFont("Helvetica-Bold", 12)
     p.drawString(50, 750, "6. VISUAL INJURY DIAGRAM")
 
+    current_y = 700
     if case.body_map_data and isinstance(case.body_map_data, list):
         markers = case.body_map_data
         used_views = set(m.get('view') for m in markers)
-        current_y = 700 
+        
         base_path = os.path.join(settings.BASE_DIR, 'assets') 
 
         for view in used_views:
@@ -368,15 +384,43 @@ def generate_pdf(request, case_id):
 
                 current_y = draw_y - 50 
                 p.setFillColor(black)
+            else:
+                p.drawString(50, current_y, f"Diagram for {view} not available.")
+                current_y -= 20
     else:
-        p.drawString(50, 700, "No visual map data available.")
+        p.drawString(50, current_y, "No visual map data available.")
+
+    # Injury Details
+    y = current_y - 50
+    if y < 200:
+        p.showPage()
+        draw_header("Page 3 (Cont): Injury Details")
+        y = 750
+    
+    if case.external_injuries:
+        p.setFont("Helvetica-Bold", 12)
+        p.drawString(50, y, "7. DETAILED INJURY DESCRIPTIONS")
+        p.setFont("Helvetica", 9)
+        y -= 20
+        for line in case.external_injuries.split('\n'):
+            if y < 50:
+                p.showPage()
+                draw_header("Page 3 (Cont): Injury Details")
+                y = 750
+            p.drawString(50, y, line)
+            y -= 12
+    else:
+        p.setFont("Helvetica-Bold", 12)
+        p.drawString(50, y, "7. DETAILED INJURY DESCRIPTIONS")
+        p.setFont("Helvetica", 10)
+        p.drawString(50, y - 20, "No detailed injury descriptions available.")
 
     p.showPage()
 
     # ================= PAGE 4: INTERNAL EXAMINATION =================
     draw_header("Page 4: Internal Exam")
     p.setFont("Helvetica-Bold", 12)
-    p.drawString(50, 750, "7. INTERNAL EXAMINATION")
+    p.drawString(50, 750, "8. INTERNAL EXAMINATION")
     
     if report:
         p.setFont("Helvetica-Bold", 10)
@@ -442,7 +486,7 @@ def generate_pdf(request, case_id):
     
     if report:
         p.setFont("Helvetica-Bold", 12)
-        p.drawString(50, 750, "8. ANCILLARY STUDIES")
+        p.drawString(50, 750, "9. ANCILLARY STUDIES")
         p.setFont("Helvetica", 10)
         
         p.drawString(50, 730, f"Toxicology: {get_text(report.toxicology_results)}")
@@ -452,13 +496,13 @@ def generate_pdf(request, case_id):
         
         p.line(50, 665, 550, 665)
         p.setFont("Helvetica-Bold", 12)
-        p.drawString(50, 650, "9. EVIDENCE DISPOSITION")
+        p.drawString(50, 650, "10. EVIDENCE DISPOSITION")
         p.setFont("Helvetica", 10)
         p.drawString(50, 635, get_text(report.evidence_disposition, "No evidence retained."))
 
         p.line(50, 615, 550, 615)
         p.setFont("Helvetica-Bold", 12)
-        p.drawString(50, 600, "10. CAUSE & MANNER OF DEATH")
+        p.drawString(50, 600, "11. CAUSE & MANNER OF DEATH")
         
         p.setFont("Helvetica-Bold", 11)
         p.drawString(50, 570, f"MANNER: {get_text(report.manner_of_death)}")

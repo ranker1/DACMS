@@ -15,6 +15,8 @@ class EvidenceSerializer(serializers.ModelSerializer):
 
 # 3. Report Serializer
 class ReportSerializer(serializers.ModelSerializer):
+    case = serializers.PrimaryKeyRelatedField(read_only=True)
+    
     class Meta:
         model = AutopsyReport
         fields = '__all__'
