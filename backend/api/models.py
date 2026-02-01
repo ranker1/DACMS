@@ -182,6 +182,106 @@ class HistologyCassette(models.Model):
 
 class Evidence(models.Model):
     case = models.ForeignKey(AutopsyCase, on_delete=models.CASCADE, related_name='evidence')
-    description = models.CharField(max_length=255)
+    # Frontend posts `item_name` and `location` so keep explicit fields
+    # Allow null for existing rows so migrations do not prompt for a default
+    item_name = models.CharField(max_length=255, blank=True, null=True)
+    location = models.CharField(max_length=100, blank=True, null=True)
+    description = models.CharField(max_length=255, blank=True, null=True)
     collected_at = models.DateTimeField(auto_now_add=True)
+
+
+# Assignment model to tie a case to a pathologist (or police officer)
+class CaseAssignment(models.Model):
+    case = models.OneToOneField(AutopsyCase, on_delete=models.CASCADE, related_name='assignment')
+    assignee = models.ForeignKey('CustomUser', on_delete=models.SET_NULL, null=True, related_name='assignments')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.case.case_id} -> {self.assignee.username if self.assignee else 'Unassigned'}"
+
+
+# Simple audit log for create/update/delete actions
+class AuditLog(models.Model):
+    ACTIONS = (('CREATE', 'Create'), ('UPDATE', 'Update'), ('DELETE', 'Delete'))
+    user = models.ForeignKey('CustomUser', on_delete=models.SET_NULL, null=True, blank=True)
+    action = models.CharField(max_length=10, choices=ACTIONS)
+    model_name = models.CharField(max_length=100)
+    object_pk = models.CharField(max_length=100)
+    timestamp = models.DateTimeField(auto_now_add=True)
+    changes = models.JSONField(blank=True, null=True)
+
+    def __str__(self):
+        return f"{self.timestamp.isoformat()} {self.action} {self.model_name}({self.object_pk}) by {self.user}"
     chain_of_custody = models.TextField(blank=True)
+
+
+# --- Consent for Clinical Autopsies ---
+class Consent(models.Model):
+    case = models.OneToOneField(AutopsyCase, on_delete=models.CASCADE, related_name='consent')
+    consent_given = models.BooleanField(default=False)
+    signer_name = models.CharField(max_length=100, blank=True)
+    relationship = models.CharField(max_length=50, blank=True)
+    signed_at = models.DateTimeField(null=True, blank=True)
+    form_file = models.FileField(upload_to='consents/', null=True, blank=True)
+    notes = models.TextField(blank=True)
+
+    def __str__(self):
+        return f"Consent for {self.case.case_id} - {'Given' if self.consent_given else 'Not Given'}"
+
+
+# --- Observers (Police, Treating Doctor, Students, Photographers) ---
+class Observer(models.Model):
+    OBSERVER_ROLES = (
+        ('POLICE', 'Police/Detective'),
+        ('TREATING_DOCTOR', 'Treating Physician'),
+        ('STUDENT', 'Medical Student/Resident'),
+        ('PHOTOGRAPHER', 'Forensic Photographer'),
+        ('OTHER', 'Other')
+    )
+    case = models.ForeignKey(AutopsyCase, on_delete=models.CASCADE, related_name='observers')
+    user = models.ForeignKey('CustomUser', on_delete=models.SET_NULL, null=True, blank=True)
+    name = models.CharField(max_length=100, blank=True)
+    role = models.CharField(max_length=30, choices=OBSERVER_ROLES, default='OTHER')
+    present = models.BooleanField(default=True)
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        who = self.user.username if self.user else self.name or 'Unknown'
+        return f"{who} ({self.role}) on {self.case.case_id}"
+
+
+# --- Chain of Custody Events ---
+class ChainOfCustody(models.Model):
+    EVENT_TYPES = (
+        ('TRANSFER', 'Transfer'),
+        ('RECEIPT', 'Receipt'),
+        ('STORAGE', 'Storage'),
+        ('RELEASE', 'Release'),
+        ('SEAL', 'Seal/Unseal')
+    )
+    evidence = models.ForeignKey('Evidence', on_delete=models.CASCADE, null=True, blank=True, related_name='chain_events')
+    case = models.ForeignKey(AutopsyCase, on_delete=models.CASCADE, null=True, blank=True, related_name='chain_events')
+    event_type = models.CharField(max_length=20, choices=EVENT_TYPES)
+    from_user = models.ForeignKey('CustomUser', on_delete=models.SET_NULL, null=True, blank=True, related_name='custody_from')
+    to_user = models.ForeignKey('CustomUser', on_delete=models.SET_NULL, null=True, blank=True, related_name='custody_to')
+    timestamp = models.DateTimeField(auto_now_add=True)
+    notes = models.TextField(blank=True)
+
+    def __str__(self):
+        return f"{self.event_type} @ {self.timestamp.isoformat()} ({self.case.case_id if self.case else 'NoCase'})"
+
+
+# --- Evidence Photos / Exhibits ---
+class EvidencePhoto(models.Model):
+    evidence = models.ForeignKey('Evidence', on_delete=models.CASCADE, null=True, blank=True, related_name='photos')
+    case = models.ForeignKey(AutopsyCase, on_delete=models.CASCADE, null=True, blank=True, related_name='photos')
+    image = models.ImageField(upload_to='evidence_photos/')
+    caption = models.CharField(max_length=255, blank=True)
+    photographer_name = models.CharField(max_length=100, blank=True)
+    photographer_role = models.CharField(max_length=50, blank=True)
+    taken_at = models.DateTimeField(null=True, blank=True)
+    is_exhibit = models.BooleanField(default=False)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Photo {self.id} for {self.case.case_id if self.case else (self.evidence.case.case_id if self.evidence else 'Unknown')}"

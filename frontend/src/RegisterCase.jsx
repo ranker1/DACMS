@@ -1,14 +1,14 @@
 import { useState } from 'react'
-import axios from 'axios'
+import api from './api'
 
-function RegisterCase({ onCaseAdded }) {
+function RegisterCase({ onCaseAdded, role, theme }) {
     const [formData, setFormData] = useState({
         case_id: '',
         deceased_name: '',
-        case_type: 'NORMAL',
+        case_type: 'NORMAL', // Default to Clinical
         gender: 'U',
-        age: '', // Starts as empty string
-        ob_number: '', 
+        age: '',
+        ob_number: '',
         police_station: ''
     })
 
@@ -18,110 +18,131 @@ function RegisterCase({ onCaseAdded }) {
 
     const handleSubmit = async (e) => {
         e.preventDefault()
-        try {
-            // --- FIX 2: HANDLE EMPTY AGE ---
-            // If age is empty string "", send null. Otherwise send the number.
-            const cleanData = {
-                ...formData,
-                age: formData.age === '' ? null : formData.age
+        
+        // Validation for Forensic Cases
+        if (formData.case_type === 'FORENSIC') {
+            if (!formData.ob_number || !formData.police_station) {
+                alert("For Forensic cases, OB Number and Police Station are required.")
+                return
             }
+        }
 
-            // Note: We don't need to manually add headers here anymore 
-            // because App.jsx handles it globally now!
-            await axios.post('http://127.0.0.1:8000/api/cases/', cleanData)
-            
-            alert("Case Registered Successfully!")
-            
-            // Reset form
+        try {
+            await api.post('cases/', formData)
+            alert('Case Registered Successfully!')
+            onCaseAdded() // Refresh list
             setFormData({
-                case_id: '',
-                deceased_name: '',
-                case_type: 'NORMAL',
-                gender: 'U',
-                age: '',
-                ob_number: '',
-                police_station: ''
+                case_id: '', deceased_name: '', case_type: 'NORMAL',
+                gender: 'U', age: '', ob_number: '', police_station: ''
             })
-            
-            if (onCaseAdded) onCaseAdded()
-            
-        } catch (error) {
-            console.error("Registration Error:", error)
-            // Show the server's exact complaint
-            if (error.response && error.response.data) {
-                alert("Error: " + JSON.stringify(error.response.data))
-            } else {
-                alert("Failed to register case.")
-            }
+        } catch (err) {
+            console.error(err)
+            alert('Error registering case: ' + JSON.stringify(err.response?.data))
+        }
+    }
+
+    // --- THEME STYLES ---
+    const isDark = theme === 'dark'
+    const colors = {
+        text: isDark ? '#f1f5f9' : '#0f172a',
+        textMuted: isDark ? '#94a3b8' : '#64748b',
+        inputBg: isDark ? '#0f172a' : '#ffffff',
+        inputBorder: isDark ? '#334155' : '#cbd5e1',
+        primary: isDark ? '#60a5fa' : '#2563eb',
+        success: '#22c55e'
+    }
+
+    const styles = {
+        header: { marginTop: 0, marginBottom: '20px', color: colors.text, display: 'flex', alignItems: 'center', gap: '10px' },
+        formGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '20px' },
+        input: {
+            width: '100%', padding: '12px', borderRadius: '6px', 
+            border: `1px solid ${colors.inputBorder}`, 
+            background: colors.inputBg, 
+            color: colors.text,
+            fontSize: '1rem', boxSizing: 'border-box', outline: 'none'
+        },
+        select: {
+            width: '100%', padding: '12px', borderRadius: '6px', 
+            border: `1px solid ${colors.inputBorder}`, 
+            background: colors.inputBg, 
+            color: colors.text,
+            fontSize: '1rem', boxSizing: 'border-box', outline: 'none'
+        },
+        button: {
+            width: '100%', padding: '12px', borderRadius: '6px', border: 'none',
+            background: colors.success, color: 'white', fontWeight: 'bold', fontSize: '1rem',
+            cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
         }
     }
 
     return (
-        <div style={{ border: '1px solid #ddd', padding: '20px', borderRadius: '8px', background: '#f9f9f9', marginBottom: '30px' }}>
-            <h3 style={{ marginTop: 0 }}>📂 Register New Case</h3>
-            
-            <form onSubmit={handleSubmit} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-                
-                {/* Row 1 */}
-                <input 
-                    name="case_id" 
-                    placeholder="Case ID (e.g., CASE-001)" 
-                    value={formData.case_id} 
-                    onChange={handleChange} 
-                    required 
-                    style={{ padding: '8px' }}
-                />
-                <input 
-                    name="deceased_name" 
-                    placeholder="Deceased Name" 
-                    value={formData.deceased_name} 
-                    onChange={handleChange} 
-                    required 
-                    style={{ padding: '8px' }}
-                />
-
-                {/* Row 2 */}
-                <select name="case_type" value={formData.case_type} onChange={handleChange} style={{ padding: '8px' }}>
-                    <option value="NORMAL">🏥 Clinical / Normal</option>
-                    <option value="FORENSIC">🚓 Forensic / Crime</option>
-                </select>
-
-                <div style={{ display: 'flex', gap: '10px' }}>
-                    <select name="gender" value={formData.gender} onChange={handleChange} style={{ padding: '8px', flex: 1 }}>
-                        <option value="U">Unknown Gender</option>
-                        <option value="M">Male</option>
-                        <option value="F">Female</option>
-                    </select>
-                    {/* The Age Input */}
+        <div>
+            <h3 style={styles.header}>📂 Register New Case</h3>
+            <form onSubmit={handleSubmit}>
+                <div style={styles.formGrid}>
                     <input 
-                        name="age" 
-                        type="number" 
-                        placeholder="Age" 
-                        value={formData.age} 
+                        name="case_id" 
+                        placeholder="Case ID (e.g., CASE-001)" 
+                        value={formData.case_id} 
                         onChange={handleChange} 
-                        style={{ padding: '8px', width: '80px' }}
+                        style={styles.input} 
+                        required 
                     />
+                    <input 
+                        name="deceased_name" 
+                        placeholder="Deceased Name" 
+                        value={formData.deceased_name} 
+                        onChange={handleChange} 
+                        style={styles.input} 
+                        required 
+                    />
+                    
+                    <select name="case_type" value={formData.case_type} onChange={handleChange} style={styles.select}>
+                        <option value="NORMAL">🔬 Clinical / Normal</option>
+                        <option value="FORENSIC">🚓 Forensic / Police</option>
+                    </select>
+
+                    <div style={{display:'flex', gap:'10px'}}>
+                        <select name="gender" value={formData.gender} onChange={handleChange} style={{...styles.select, flex: 2}}>
+                            <option value="U">Unknown Gender</option>
+                            <option value="M">Male</option>
+                            <option value="F">Female</option>
+                        </select>
+                        <input 
+                            name="age" 
+                            type="number" 
+                            placeholder="Age" 
+                            value={formData.age} 
+                            onChange={handleChange} 
+                            style={{...styles.input, flex: 1}} 
+                        />
+                    </div>
+
+                    {/* CONDITIONAL RENDERING: Only show if FORENSIC */}
+                    {formData.case_type === 'FORENSIC' && (
+                        <>
+                            <input 
+                                name="ob_number" 
+                                placeholder="OB Number (Required)" 
+                                value={formData.ob_number} 
+                                onChange={handleChange} 
+                                style={{...styles.input, borderColor: '#f59e0b'}} // Orange border to highlight requirement
+                                required
+                            />
+                            <input 
+                                name="police_station" 
+                                placeholder="Police Station (Required)" 
+                                value={formData.police_station} 
+                                onChange={handleChange} 
+                                style={{...styles.input, borderColor: '#f59e0b'}} 
+                                required
+                            />
+                        </>
+                    )}
                 </div>
 
-                {/* Row 3 */}
-                <input 
-                    name="ob_number" 
-                    placeholder="OB Number" 
-                    value={formData.ob_number} 
-                    onChange={handleChange} 
-                    style={{ padding: '8px' }}
-                />
-                <input 
-                    name="police_station" 
-                    placeholder="Police Station" 
-                    value={formData.police_station} 
-                    onChange={handleChange} 
-                    style={{ padding: '8px' }}
-                />
-
-                <button type="submit" style={{ gridColumn: '1 / -1', padding: '10px', background: '#28a745', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}>
-                    + Register Case
-                </button>
+                <button type="submit" style={styles.button}>+ Register Case</button>
             </form>
         </div>
     )

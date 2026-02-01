@@ -10,7 +10,7 @@ const injuryTypes = {
     SURGICAL:   { color: '#0dcaf0', label: 'Surgical/Scar', code: 'SURG' }       
 }
 
-function BodyMap({ existingData, gender, age, onSave }) {
+function BodyMap({ existingData, gender, age, onSave, canEdit = true }) {
     // 1. All Possible Diagrams
     const allDiagrams = {
         MALE: '/diagrams/male.png',
@@ -93,6 +93,7 @@ function BodyMap({ existingData, gender, age, onSave }) {
 
     // --- CLICK HANDLER ---
     const handleMapClick = (e) => {
+        if (!canEdit) return
         const rect = e.target.getBoundingClientRect()
         const xInBox = e.clientX - rect.left
         const yInBox = e.clientY - rect.top
@@ -190,12 +191,17 @@ function BodyMap({ existingData, gender, age, onSave }) {
                         ))
                     }
                 </ul>
-                <button onClick={() => {
+                <>
+                {canEdit && (
+                    <button onClick={() => {
                     const txt = markers.map((m, i) => `${i+1}. [${m.view}] ${injuryTypes[m.type]?.label || m.type}: ${m.description}`).join('\n')
                     const json = markers
                     onSave(txt, json)
                     alert('Body map injuries saved!')
-                }} style={{marginTop:'10px', background:'#007bff', color:'white', border:'none', padding:'8px 16px', borderRadius:'4px', cursor:'pointer'}}>💾 Save Injuries</button>
+                    }} style={{marginTop:'10px', background:'#007bff', color:'white', border:'none', padding:'8px 16px', borderRadius:'4px', cursor:'pointer'}}>💾 Save Injuries</button>
+                )}
+                {!canEdit && <div style={{marginTop:'10px', color:'#666', fontStyle:'italic'}}>You do not have permission to modify the body map.</div>}
+                </>
             </div>
         </div>
     )

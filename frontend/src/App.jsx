@@ -1,25 +1,17 @@
 import { useState, useEffect } from 'react'
 import { Routes, Route, useNavigate, Navigate } from 'react-router-dom'
-import axios from 'axios' // <--- Import Axios
+import api from './api'
 import Login from './Login'
 import Dashboard from './Dashboard'
 import CaseDetails from './CaseDetails'
+import { initTheme } from './theme'
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem('token'))
   const [role, setRole] = useState(localStorage.getItem('role'))
   const navigate = useNavigate()
 
-  // --- CRITICAL FIX: AUTOMATICALLY ATTACH TOKEN ---
-  useEffect(() => {
-    if (token) {
-      // If we have a token, tell Axios to use it for EVERYTHING
-      axios.defaults.headers.common['Authorization'] = `Token ${token}`
-    } else {
-      // If no token, remove the header
-      delete axios.defaults.headers.common['Authorization']
-    }
-  }, [token]) // Run this whenever 'token' changes
+  // `api` instance attaches token automatically from localStorage
 
   const handleLogin = (newToken, newRole) => {
     setToken(newToken)
@@ -36,6 +28,10 @@ function App() {
     navigate('/')
   }
 
+  useEffect(()=>{
+    initTheme()
+  }, [])
+
   if (!token) {
       return <Login onLoginSuccess={handleLogin} />
   }
@@ -43,7 +39,7 @@ function App() {
   return (
     <Routes>
         <Route path="/" element={<Dashboard role={role} onLogout={handleLogout} />} />
-        <Route path="/cases/:id" element={<CaseDetails />} />
+        <Route path="/cases/:id" element={<CaseDetails role={role} />} />
         <Route path="*" element={<Navigate to="/" />} />
     </Routes>
   )

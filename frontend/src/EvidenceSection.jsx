@@ -1,15 +1,16 @@
 import { useState } from 'react'
-import axios from 'axios'
+import api from './api'
 
 function EvidenceSection({ caseId, evidenceList, onEvidenceAdded }) {
     const [newItem, setNewItem] = useState('')
+    const canEdit = role === 'PATHOLOGIST' || role === 'ADMIN'
 
     const handleAddEvidence = async (e) => {
         e.preventDefault()
         if (!newItem) return
 
         try {
-            await axios.post('http://127.0.0.1:8000/api/evidence/', {
+            await api.post('evidence/', {
                 case: caseId, 
                 item_name: newItem,
                 location: "Reception" 
@@ -40,6 +41,7 @@ function EvidenceSection({ caseId, evidenceList, onEvidenceAdded }) {
             </ul>
 
             {/* Form to add new evidence */}
+            {canEdit ? (
             <form onSubmit={handleAddEvidence} style={{ display: 'flex', gap: '5px' }}>
                 <input 
                     type="text" 
@@ -69,6 +71,9 @@ function EvidenceSection({ caseId, evidenceList, onEvidenceAdded }) {
                     Add
                 </button>
             </form>
+            ) : (
+                <div style={{ color: '#666', fontStyle: 'italic' }}>You do not have permission to add evidence.</div>
+            )}
         </div>
     )
 }

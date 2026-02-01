@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import axios from 'axios'
+import api from './api'
 
 function RegisterUser() {
     const [formData, setFormData] = useState({
@@ -15,10 +15,7 @@ function RegisterUser() {
     const handleSubmit = async (e) => {
         e.preventDefault()
         try {
-            const token = localStorage.getItem('token')
-            await axios.post('http://127.0.0.1:8000/api/register/', formData, {
-                headers: { 'Authorization': `Token ${token}` }
-            })
+            await api.post('register/', formData)
             alert(`User ${formData.username} created!`)
             setFormData({ username: '', password: '', role: 'POLICE' }) // Reset
         } catch (error) {

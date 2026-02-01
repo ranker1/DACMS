@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import axios from 'axios'
+import api from './api'
 import { useNavigate } from 'react-router-dom'
 
 function Login({ onLoginSuccess }) {
@@ -14,7 +14,7 @@ function Login({ onLoginSuccess }) {
         
         try {
             // 1. Send credentials to Backend
-            const res = await axios.post('http://127.0.0.1:8000/api/login/', {
+            const res = await api.post('login/', {
                 username: username,
                 password: password
             })

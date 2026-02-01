@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import axios from 'axios'
+import api from './api'
 
-function ReportForm({ caseId, onReportSaved, existingReport }) {
+function ReportForm({ caseId, onReportSaved, existingReport, role }) {
     const [formData, setFormData] = useState({
         cause_of_death: existingReport ? existingReport.cause_of_death : '',
         manner_of_death: existingReport ? existingReport.manner_of_death : 'NATURAL',
@@ -14,15 +14,19 @@ function ReportForm({ caseId, onReportSaved, existingReport }) {
 
     const handleSubmit = async (e) => {
         e.preventDefault()
+        if (!(role === 'PATHOLOGIST' || role === 'ADMIN')) {
+            alert('You do not have permission to submit reports.')
+            return
+        }
         try {
             const payload = { ...formData, case: caseId }
             
             if (existingReport) {
                 // UPDATE existing report (PUT)
-                await axios.put(`http://127.0.0.1:8000/api/reports/${caseId}/`, payload)
+                await api.put(`reports/${caseId}/`, payload)
             } else {
                 // CREATE new report (POST)
-                await axios.post('http://127.0.0.1:8000/api/reports/', payload)
+                await api.post('reports/', payload)
             }
             
             alert("Report Saved Successfully")
