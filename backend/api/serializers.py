@@ -1,15 +1,37 @@
 from rest_framework import serializers
-from .models import CustomUser, AutopsyCase, Evidence, AutopsyReport, HistologyCassette
+from .models import CustomUser, AutopsyCase, Evidence, AutopsyReport, HistologyCassette, Organization
 from .models import Consent, Observer, ChainOfCustody, EvidencePhoto
 
 
-# 1. User Serializer (remove non-existent fields)
 class UserSerializer(serializers.ModelSerializer):
+    organization_name = serializers.CharField(source='organization.name', read_only=True)
+    organization_type = serializers.CharField(source='organization.org_type', read_only=True)
+    password = serializers.CharField(write_only=True, required=False)
+
     class Meta:
         model = CustomUser
-        fields = ['id', 'username', 'email', 'role']
+        fields = ['id', 'username', 'password', 'email', 'first_name', 'last_name', 
+                  'role', 'organization', 'organization_name', 'organization_type', 
+                  'employee_id', 'phone', 'department', 'is_active']
 
+    def create(self, validated_data):
+        password = validated_data.pop('password', None)
+        user = CustomUser(**validated_data)
+        if password:
+            user.set_password(password)
+        else:
+            user.set_unusable_password()
+        user.save()
+        return user
 
+    def update(self, instance, validated_data):
+        password = validated_data.pop('password', None)
+        for attr, val in validated_data.items():
+            setattr(instance, attr, val)
+        if password:
+            instance.set_password(password)
+        instance.save()
+        return instance
 # 2. Evidence Serializer (match frontend keys like `item_name`)
 class EvidenceSerializer(serializers.ModelSerializer):
     class Meta:
@@ -92,3 +114,20 @@ class EvidencePhotoSerializer(serializers.ModelSerializer):
     class Meta:
         model = EvidencePhoto
         fields = '__all__'
+
+
+# Organization Serializer
+class OrganizationSerializer(serializers.ModelSerializer):
+    parent_org_name = serializers.CharField(source='parent_org.name', read_only=True)
+    child_orgs_count = serializers.SerializerMethodField()
+    case_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Organization
+        fields = '__all__'
+
+    def get_child_orgs_count(self, obj):
+        return obj.child_orgs.count()
+    
+    def get_case_count(self, obj):
+        return obj.cases.count()

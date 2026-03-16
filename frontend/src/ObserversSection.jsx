@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
 import api from './api'
+import { useToasts } from './Toasts'
 
 export default function ObserversSection({ caseId, canEdit, colors }) {
+    const { addToast } = useToasts()
     const [list, setList] = useState([])
     const [loading, setLoading] = useState(true)
     const [name, setName] = useState('')
@@ -17,18 +19,18 @@ export default function ObserversSection({ caseId, canEdit, colors }) {
     }, [caseId])
 
     const add = async () => {
-        if (!canEdit) return alert('No permission')
+        if (!canEdit) return addToast('No permission', { type: 'error' })
         try {
             const payload = { case: caseId, name, role }
             const res = await api.post('observers/', payload)
             setList(prev => [...prev, res.data])
             setName('')
             setRole('OTHER')
-        } catch (err) { console.error(err); alert('Failed to add observer') }
+        } catch (err) { console.error(err); addToast('Failed to add observer', { type: 'error' }) }
     }
 
     const remove = async (id) => {
-        if (!canEdit) return alert('No permission')
+        if (!canEdit) return addToast('No permission', { type: 'error' })
         try { 
             await api.delete(`observers/${id}/`)
             setList(prev => prev.filter(x => x.id !== id)) 

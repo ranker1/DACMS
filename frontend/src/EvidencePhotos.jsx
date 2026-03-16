@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import api from './api'
+import { useToasts } from './Toasts'
 
 // Helper to handle relative vs absolute URLs
 function imageUrl(path){
@@ -8,6 +9,7 @@ function imageUrl(path){
 }
 
 export default function EvidencePhotos({ caseId, canEdit, colors }){
+  const { addToast } = useToasts()
   const [photos, setPhotos] = useState([])
   const [loading, setLoading] = useState(true)
   const [file, setFile] = useState(null)
@@ -25,8 +27,8 @@ export default function EvidencePhotos({ caseId, canEdit, colors }){
 
   const upload = async (e) => {
     e.preventDefault() // Prevent form submit refresh if wrapped in form
-    if(!canEdit) return alert('No permission')
-    if(!file) return alert('Select file')
+    if(!canEdit) return addToast('No permission', { type: 'error' })
+    if(!file) return addToast('Select file', { type: 'error' })
     
     const fd = new FormData()
     fd.append('case', caseId)
@@ -41,8 +43,8 @@ export default function EvidencePhotos({ caseId, canEdit, colors }){
       // Reset file input manually
       document.getElementById('fileInput').value = "" 
     } catch(err){ 
-        console.error(err); 
-        alert('Upload failed') 
+      console.error(err); 
+      addToast('Upload failed', { type: 'error' }) 
     }
   }
 

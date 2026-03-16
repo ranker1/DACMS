@@ -26,3 +26,29 @@ export function toggleTheme(){
   setTheme(next)
   return next
 }
+
+// Organization branding functions
+export function applyOrganizationBranding(organization) {
+  if (!organization) return
+
+  const root = document.documentElement
+
+  // Set organization-specific CSS custom properties
+  root.style.setProperty('--org-primary', organization.primary_color || '#2563eb')
+  root.style.setProperty('--org-secondary', organization.secondary_color || '#1e40af')
+
+  // Store organization info
+  localStorage.setItem('organization', JSON.stringify(organization))
+}
+
+export function getStoredOrganization() {
+  const org = localStorage.getItem('organization')
+  return org ? JSON.parse(org) : null
+}
+
+export function clearOrganizationBranding() {
+  localStorage.removeItem('organization')
+  const root = document.documentElement
+  root.style.removeProperty('--org-primary')
+  root.style.removeProperty('--org-secondary')
+}

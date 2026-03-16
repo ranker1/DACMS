@@ -1,12 +1,28 @@
 from django.contrib import admin
 from .models import CustomUser, AutopsyCase, AutopsyReport, HistologyCassette, Evidence
-from .models import CaseAssignment, AuditLog
+from .models import CaseAssignment, AuditLog, Organization
 from .models import Consent, Observer, ChainOfCustody, EvidencePhoto
 
 
 @admin.register(CustomUser)
 class CustomUserAdmin(admin.ModelAdmin):
 	list_display = ('username', 'email', 'role', 'is_staff', 'is_superuser')
+
+
+@admin.register(Organization)
+class OrganizationAdmin(admin.ModelAdmin):
+	list_display = ('name', 'department', 'phone', 'email')
+	fieldsets = (
+		('Basic Information', {
+			'fields': ('name', 'department')
+		}),
+		('Contact Information', {
+			'fields': ('address', 'phone', 'email', 'website')
+		}),
+		('Branding', {
+			'fields': ('logo_url', 'report_footer')
+		}),
+	)
 
 
 @admin.register(AutopsyCase)

@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import api from './api'
+import { useToasts } from './Toasts'
 
 function ReportForm({ caseId, onReportSaved, existingReport, role }) {
+    const { addToast } = useToasts()
     const [formData, setFormData] = useState({
         cause_of_death: existingReport ? existingReport.cause_of_death : '',
         manner_of_death: existingReport ? existingReport.manner_of_death : 'NATURAL',
@@ -15,7 +17,7 @@ function ReportForm({ caseId, onReportSaved, existingReport, role }) {
     const handleSubmit = async (e) => {
         e.preventDefault()
         if (!(role === 'PATHOLOGIST' || role === 'ADMIN')) {
-            alert('You do not have permission to submit reports.')
+            addToast('You do not have permission to submit reports.', { type: 'error' })
             return
         }
         try {
@@ -29,11 +31,11 @@ function ReportForm({ caseId, onReportSaved, existingReport, role }) {
                 await api.post('reports/', payload)
             }
             
-            alert("Report Saved Successfully")
+            addToast("Report Saved Successfully", { type: 'success' })
             onReportSaved()
         } catch (error) {
             console.error(error)
-            alert("Error saving report. Check console for details.")
+            addToast("Error saving report. Check console for details.", { type: 'error' })
         }
     }
     return (

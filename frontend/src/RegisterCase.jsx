@@ -1,13 +1,16 @@
 import { useState } from 'react'
 import api from './api'
+import { useToasts } from './Toasts'
 
-function RegisterCase({ onCaseAdded, role, theme }) {
+function RegisterCase({ onCaseAdded, role, theme, organizationId }) {
+    const { addToast } = useToasts()
     const [formData, setFormData] = useState({
         case_id: '',
         deceased_name: '',
         case_type: 'NORMAL', // Default to Clinical
         gender: 'U',
         age: '',
+        date_of_arrival: '',
         ob_number: '',
         police_station: ''
     })
@@ -22,22 +25,27 @@ function RegisterCase({ onCaseAdded, role, theme }) {
         // Validation for Forensic Cases
         if (formData.case_type === 'FORENSIC') {
             if (!formData.ob_number || !formData.police_station) {
-                alert("For Forensic cases, OB Number and Police Station are required.")
+                addToast("For Forensic cases, OB Number and Police Station are required.", { type: 'error' })
                 return
             }
         }
 
         try {
-            await api.post('cases/', formData)
-            alert('Case Registered Successfully!')
+            const submitData = { ...formData }
+            if (organizationId) {
+                submitData.organization = organizationId
+            }
+            
+            await api.post('cases/', submitData)
+            addToast('Case Registered Successfully!', { type: 'success' })
             onCaseAdded() // Refresh list
             setFormData({
                 case_id: '', deceased_name: '', case_type: 'NORMAL',
-                gender: 'U', age: '', ob_number: '', police_station: ''
+                gender: 'U', age: '', date_of_arrival: '', ob_number: '', police_station: ''
             })
         } catch (err) {
             console.error(err)
-            alert('Error registering case: ' + JSON.stringify(err.response?.data))
+            addToast('Error registering case: ' + JSON.stringify(err.response?.data), { type: 'error' })
         }
     }
 
@@ -118,6 +126,15 @@ function RegisterCase({ onCaseAdded, role, theme }) {
                             style={{...styles.input, flex: 1}} 
                         />
                     </div>
+
+                    <input 
+                        name="date_of_arrival" 
+                        type="datetime-local" 
+                        placeholder="Date of Arrival" 
+                        value={formData.date_of_arrival} 
+                        onChange={handleChange} 
+                        style={styles.input}
+                    />
 
                     {/* CONDITIONAL RENDERING: Only show if FORENSIC */}
                     {formData.case_type === 'FORENSIC' && (

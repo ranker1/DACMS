@@ -10,8 +10,8 @@
   --surface: #ffffff;
   --muted: #6b7280;
   --text: #0f172a;
-  --primary: #2563eb; /* blue-600 */
-  --accent: #7c3aed; /* purple */
+  --primary: var(--org-primary, #2563eb); /* Use organization primary color */
+  --accent: var(--org-secondary, #7c3aed); /* Use organization secondary color */
   --danger: #dc2626;
   --card-shadow: 0 2px 8px rgba(15,23,42,0.06);
 
@@ -29,8 +29,8 @@
   --surface: #0f1724;
   --muted: #9ca3af;
   --text: #e6eef8;
-  --primary: #4f46e5;
-  --accent: #8b5cf6;
+  --primary: var(--org-primary, #4f46e5);
+  --accent: var(--org-secondary, #8b5cf6);
   --danger: #ef4444;
   --card-shadow: 0 2px 12px rgba(2,6,23,0.6);
 

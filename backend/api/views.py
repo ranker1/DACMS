@@ -17,8 +17,8 @@ from rest_framework import status
 from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.authtoken.models import Token
 from rest_framework.response import Response
-from .models import CustomUser, AutopsyCase, Evidence, AutopsyReport
-from .serializers import UserSerializer, AutopsyCaseSerializer, EvidenceSerializer, ReportSerializer
+from .models import CustomUser, AutopsyCase, Evidence, AutopsyReport, Organization
+from .serializers import UserSerializer, AutopsyCaseSerializer, EvidenceSerializer, ReportSerializer, OrganizationSerializer
 from .models import HistologyCassette
 from .serializers import HistologyCassetteSerializer
 from rest_framework.parsers import JSONParser
@@ -32,6 +32,8 @@ from .models import Consent, Observer, ChainOfCustody, EvidencePhoto
 from .serializers import ConsentSerializer, ObserverSerializer, ChainOfCustodySerializer, EvidencePhotoSerializer
 from rest_framework.parsers import MultiPartParser, FormParser
 from reportlab.lib.pagesizes import letter
+from .models import AuditLog  # <--- Add this
+from .serializers import AuditLogSerializer # <--- Add this
 
 # Custom Permission
 class IsPathologistOrAdmin(permissions.BasePermission):
@@ -45,7 +47,7 @@ class IsAdmin(permissions.BasePermission):
 
 
 class ReadOnlyForPolice(permissions.BasePermission):
-    """Allow read-only for police; full access for pathologist/admin."""
+    """Allow read-only for police; full access for other roles."""
     def has_permission(self, request, view):
         if not request.user.is_authenticated:
             return False
@@ -55,23 +57,14 @@ class ReadOnlyForPolice(permissions.BasePermission):
 
 
 class IsAssigneeOrAdminOrPathologist(permissions.BasePermission):
-    """Object-level: allow edit if user is assignee, pathologist, or admin; police read-only."""
+    """Object-level: allow edit if user can manage cases; police read-only."""
     def has_object_permission(self, request, view, obj):
         # SAFE methods allowed for authenticated users
         if request.method in permissions.SAFE_METHODS:
             return request.user.is_authenticated
 
-        # Admin always allowed
-        if request.user.role == 'ADMIN':
-            return True
-
-        # Pathologists allowed
-        if request.user.role == 'PATHOLOGIST':
-            return True
-
-        # If object has assignment, only assignee can edit
-        assignment = getattr(obj, 'assignment', None)
-        if assignment and assignment.assignee_id == getattr(request.user, 'id', None):
+        # Users who can manage cases have full access
+        if request.user.can_manage_cases:
             return True
 
         return False
@@ -80,7 +73,63 @@ class IsAssigneeOrAdminOrPathologist(permissions.BasePermission):
 class UserViewSet(viewsets.ModelViewSet):
     queryset = CustomUser.objects.all()
     serializer_class = UserSerializer
-    permission_classes = [permissions.IsAuthenticated] # Only logged-in users
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = super().get_queryset()
+
+        if user.role == 'MINISTRY_ADMIN':
+            # Respect optional filters from query params
+            org_id = self.request.query_params.get('organization')
+            role = self.request.query_params.get('role')
+            if org_id:
+                qs = qs.filter(organization_id=org_id)
+            if role:
+                qs = qs.filter(role=role)
+            return qs
+
+        if user.role == 'HOSPITAL_ADMIN':
+            # Hospital admins only see users from their own organization
+            qs = qs.filter(organization=user.organization)
+            # Optionally filter by role
+            role = self.request.query_params.get('role')
+            if role:
+                qs = qs.filter(role=role)
+            return qs
+
+        # Other users can only see themselves
+        return qs.filter(id=user.id)
+
+# Organization ViewSet
+class OrganizationViewSet(viewsets.ModelViewSet):
+    queryset = Organization.objects.all()
+    serializer_class = OrganizationSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+
+        # Ministry level users can see all organizations
+        if user.is_ministry_level:
+            return super().get_queryset()
+
+        # Hospital users can only see their own organization
+        return super().get_queryset().filter(id=user.organization.id)
+
+    def perform_create(self, serializer):
+        # Only ministry admins can create organizations
+        if not self.request.user.role == 'MINISTRY_ADMIN':
+            raise permissions.PermissionDenied('Only Ministry administrators can create organizations')
+
+        serializer.save()
+
+    def perform_update(self, serializer):
+        # Only ministry admins can update organizations
+        if not self.request.user.role == 'MINISTRY_ADMIN':
+            raise permissions.PermissionDenied('Only Ministry administrators can update organizations')
+
+        serializer.save()
 
 # 2. Case ViewSet
 class AutopsyCaseViewSet(viewsets.ModelViewSet):
@@ -91,26 +140,60 @@ class AutopsyCaseViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
         user = self.request.user
-        # Police see only cases (read-only) but restrict sensitive fields server-side via serializers/UI
-        if user.role == 'POLICE':
-            return qs  # could filter further if needed (e.g., by police station)
-        # Pathologists see all cases; admins see all
-        return qs
+
+        # Ministry level users can see all cases, but can filter by organization
+        if user.is_ministry_level:
+            org_id = self.request.query_params.get('organization')
+            if org_id:
+                return qs.filter(organization_id=org_id)
+            return qs
+
+        # Hospital level users only see cases from their organization
+        return qs.filter(organization=user.organization)
 
     def perform_create(self, serializer):
-        # Only pathologist or admin can create
-        if not (self.request.user.role in ['PATHOLOGIST', 'ADMIN']):
-            raise permissions.PermissionDenied('Only pathologists or admins can create cases')
-        instance = serializer.save()
+        user = self.request.user
+
+        # For ministry admins, organization might be specified in the request
+        if user.is_ministry_level:
+            org_id = self.request.data.get('organization')
+            if org_id:
+                try:
+                    from .models import Organization
+                    organization = Organization.objects.get(id=org_id)
+                    instance = serializer.save(organization=organization)
+                except Organization.DoesNotExist:
+                    raise serializers.ValidationError("Invalid organization specified")
+            else:
+                raise serializers.ValidationError("Organization must be specified for case creation")
+        else:
+            # Hospital users create cases for their organization
+            instance = serializer.save(organization=user.organization)
+
         # Optionally assign the creator as assignee
         try:
             from .models import CaseAssignment
-            CaseAssignment.objects.update_or_create(case=instance, defaults={'assignee': self.request.user})
+            CaseAssignment.objects.update_or_create(case=instance, defaults={'assignee': user})
         except Exception:
             pass
     @action(detail=True, methods=['get'])
     def download_pdf(self, request, pk=None):
+        print("DEBUG: PDF download endpoint called!")
+        from .models import Organization
         autopsy_case = self.get_object()
+        
+        # Get organization info (create default if none exists)
+        try:
+            org = Organization.objects.first()
+            if not org:
+                org = Organization.objects.create()
+        except:
+            # Fallback if model doesn't exist yet
+            org = type('obj', (object,), {
+                'name': 'Ministry of Health - Republic of Kenya',
+                'department': 'Department of Forensic Pathology',
+                'report_footer': 'This is an official government document. Unauthorized reproduction is prohibited.'
+            })()
         
         # Create the HttpResponse object with the appropriate PDF headers.
         response = HttpResponse(content_type='application/pdf')
@@ -121,16 +204,68 @@ class AutopsyCaseViewSet(viewsets.ModelViewSet):
         width, height = A4
 
         # --- HEADER ---
-        p.setFont("Helvetica-Bold", 16)
-        p.drawString(50, height - 50, "MINISTRY OF HEALTH - KENYA")
-        p.setFont("Helvetica", 12)
-        p.drawString(50, height - 70, "Department of Forensic Pathology")
-        
+        # Try to add the Ministry logo
+        logo_path = os.path.join(settings.BASE_DIR, '..', 'frontend', 'public', 'moh-logo.png')
+        text_x = 50  # Default text position
+
+        print(f"DEBUG: Looking for logo at: {logo_path}")
+        print(f"DEBUG: Logo file exists: {os.path.exists(logo_path)}")
+
+        if os.path.exists(logo_path):
+            try:
+                print("DEBUG: Attempting to load logo...")
+                # For PNG with transparency, try to handle it properly
+                from PIL import Image
+                img = Image.open(logo_path)
+
+                # Convert RGBA to RGB if necessary
+                if img.mode == 'RGBA':
+                    print("DEBUG: Converting RGBA to RGB")
+                    # Create a white background
+                    background = Image.new('RGB', img.size, (255, 255, 255))
+                    background.paste(img, mask=img.split()[-1])  # Use alpha channel as mask
+                    img = background
+
+                # Save to a temporary RGB version
+                import tempfile
+                temp_fd, temp_path = tempfile.mkstemp(suffix='.png')
+                os.close(temp_fd)
+                img.save(temp_path, 'PNG')
+
+                # Now load the converted image
+                p.drawImage(ImageReader(temp_path), 50, height - 90, width=60, height=60)
+                print("DEBUG: Logo loaded successfully after conversion")
+
+                # Clean up temp file
+                os.unlink(temp_path)
+
+                # Adjust text position to accommodate logo
+                text_x = 120
+            except Exception as e:
+                print(f"DEBUG: Logo loading failed: {e}")
+                text_x = 50
+        else:
+            print(f"Warning: Logo file not found at {logo_path}")
+
+        p.setFont("Helvetica-Bold", 18)
+        p.drawString(text_x, height - 50, org.name.upper())
+        p.setFont("Helvetica-Bold", 14)
+        p.drawString(text_x, height - 70, org.department.upper())
+        p.setFont("Helvetica", 10)
+        p.drawString(text_x, height - 85, "Autopsy Case Management System")
+        p.drawString(text_x, height - 100, f"Report Generated: {timezone.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
         # Draw a line
-        p.line(50, height - 80, width - 50, height - 80)
+        p.line(50, height - 110, width - 50, height - 110)
+
+        # Add ministry seal/watermark effect
+        p.setFont("Helvetica", 8)
+        p.setFillColorRGB(0.7, 0.7, 0.7)  # Light gray
+        p.drawCentredString(width/2, height - 720, f"OFFICIAL GOVERNMENT DOCUMENT - {org.name.upper()}")
+        p.setFillColor(colors.black)  # Reset to black
 
         # --- CASE INFO ---
-        y = height - 120
+        y = height - 140
         p.setFont("Helvetica-Bold", 12)
         p.drawString(50, y, f"CASE REPORT: {autopsy_case.case_id}")
         
@@ -141,10 +276,13 @@ class AutopsyCaseViewSet(viewsets.ModelViewSet):
         
         y -= 20
         p.drawString(50, y, f"Age/Gender: {autopsy_case.age} / {autopsy_case.gender}")
-        p.drawString(300, y, f"Date: {autopsy_case.date_of_arrival.strftime('%Y-%m-%d')}")
+        p.drawString(300, y, f"Date of Arrival: {autopsy_case.date_of_arrival.strftime('%Y-%m-%d %H:%M') if autopsy_case.date_of_arrival else 'N/A'}")
+
+        y -= 20
+        p.drawString(50, y, f"Case Type: {autopsy_case.case_type}")
+        p.drawString(300, y, f"Status: {autopsy_case.status}")
 
         # --- THE FINDINGS (Check if report exists) ---
-        # --- THE FINDINGS (Safe Check) ---
         y -= 40
         p.line(50, y, width - 50, y)
         y -= 30
@@ -184,8 +322,12 @@ class AutopsyCaseViewSet(viewsets.ModelViewSet):
         # --- FOOTER ---
         p.setFont("Helvetica", 9)
         p.setFillColor(colors.black)
-        p.drawString(50, 50, f"Generated by DACMS on {timezone.now().strftime('%Y-%m-%d %H:%M')}")
-        p.drawString(50, 35, "This is a computer-generated document.")
+        p.drawString(50, 50, f"Generated by {org.name} DACMS on {timezone.now().strftime('%Y-%m-%d %H:%M')}")
+        p.drawString(50, 35, org.report_footer)
+        if org.phone:
+            p.drawString(50, 20, f"Contact: {org.phone}")
+        if org.website:
+            p.drawString(50, 5, f"Website: {org.website}")
 
         # Close the PDF object cleanly, and we're done.
         p.showPage()
@@ -404,29 +546,47 @@ class CustomLoginView(ObtainAuthToken):
     
 
 class RegisterUserView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
     def post(self, request):
-        # 1. Security Check: Only Admins can create users
-        if not request.user.is_superuser and request.user.role != 'ADMIN':
+        # Security Check: Only Ministry Admins and Hospital Admins can create users
+        allowed_roles = ['MINISTRY_ADMIN', 'HOSPITAL_ADMIN']
+        if not request.user.is_superuser and request.user.role not in allowed_roles:
             return Response({'error': 'Unauthorized'}, status=status.HTTP_403_FORBIDDEN)
 
-        # 2. Get Data
+        # Get Data
         username = request.data.get('username')
         password = request.data.get('password')
         role = request.data.get('role')
 
-        # 3. Validation
+        # Validation
         if not username or not password or not role:
             return Response({'error': 'All fields are required'}, status=status.HTTP_400_BAD_REQUEST)
 
         if CustomUser.objects.filter(username=username).exists():
             return Response({'error': 'Username already exists'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 4. Create User
+        # Create User — assign to the creator's organization automatically
         try:
-            user = CustomUser.objects.create_user(username=username, password=password, role=role)
+            user = CustomUser.objects.create_user(
+                username=username,
+                password=password,
+                role=role,
+                organization=request.user.organization
+            )
             return Response({'message': f'User {username} created successfully!'}, status=status.HTTP_201_CREATED)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+# ... existing viewsets ...
+
+class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Read-only endpoint for system audit logs.
+    """
+    queryset = AuditLog.objects.all().order_by('-timestamp')
+    serializer_class = AuditLogSerializer
+    permission_classes = [permissions.IsAuthenticated] # Optional: Restrict to logged in users
         
 def generate_pdf(request, case_id):
     # --- 1. GET THE CASE ---
@@ -453,12 +613,36 @@ def generate_pdf(request, case_id):
     # Helper: Draw Header
     def draw_header(title, is_first_page=False):
         p.setFillColor(black)
+        
+        # Add Ministry Logo (Top Left) - Only on first page
+        if is_first_page:
+            logo_path = os.path.join(settings.BASE_DIR, '..', 'frontend', 'public', 'moh-logo.png')
+            if os.path.exists(logo_path):
+                try:
+                    from PIL import Image
+                    img = Image.open(logo_path)
+                    # Convert RGBA to RGB if necessary
+                    if img.mode == 'RGBA':
+                        background = Image.new('RGB', img.size, (255, 255, 255))
+                        background.paste(img, mask=img.split()[-1])
+                        img = background
+                    
+                    # Save to temp and load
+                    import tempfile
+                    temp_fd, temp_path = tempfile.mkstemp(suffix='.png')
+                    os.close(temp_fd)
+                    img.save(temp_path, 'PNG')
+                    p.drawImage(ImageReader(temp_path), 50, 720, width=60, height=60)
+                    os.unlink(temp_path)
+                except Exception as e:
+                    print(f"Logo load failed: {e}")
+        
         # Main Title
         p.setFont("Helvetica-Bold", 16)
-        p.drawString(50, 750, f"OFFICIAL AUTOPSY REPORT: {case.case_id}")
+        p.drawString(130 if is_first_page else 50, 750, f"OFFICIAL AUTOPSY REPORT: {case.case_id}")
         
         p.setFont("Helvetica-Bold", 10)
-        p.drawString(50, 735, "CONFIDENTIAL - FORENSIC PATHOLOGY UNIT")
+        p.drawString(130 if is_first_page else 50, 735, "CONFIDENTIAL - FORENSIC PATHOLOGY UNIT")
         p.line(50, 730, 550, 730)
         
         # Section Title (Top Right)

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useToasts } from './Toasts'
 import api from './api'
 
 export default function ConsentSection({ caseId, canEdit, colors }){
@@ -17,9 +18,10 @@ export default function ConsentSection({ caseId, canEdit, colors }){
     return ()=>{ mounted=false }
   },[caseId])
 
+  const { addToast } = useToasts()
   const handleSubmit = async (e) =>{
     e.preventDefault()
-    if(!canEdit) return alert('No permission')
+    if(!canEdit) return addToast('No permission', { type: 'error' })
     
     const form = new FormData()
     form.append('case', caseId)
@@ -34,15 +36,15 @@ export default function ConsentSection({ caseId, canEdit, colors }){
       if(consent && consent.id){
         const res = await api.patch(`consents/${consent.id}/`, form, { headers: {'Content-Type': 'multipart/form-data'} })
         setConsent(res.data)
-        alert('Consent updated')
+        addToast('Consent updated', { type: 'success' })
       } else {
         const res = await api.post('consents/', form, { headers: {'Content-Type': 'multipart/form-data'} })
         setConsent(res.data)
-        alert('Consent created')
+        addToast('Consent created', { type: 'success' })
       }
     } catch(err){
       console.error(err)
-      alert('Failed to save consent')
+      addToast('Failed to save consent', { type: 'error' })
     }
   }
 

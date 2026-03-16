@@ -5,13 +5,95 @@ import qrcode
 from io import BytesIO
 from django.core.files import File
 
+class Organization(models.Model):
+    """Organization/Ministry/Hospital configuration"""
+    ORG_TYPES = [
+        ('MINISTRY', 'Ministry of Health'),
+        ('HOSPITAL', 'Government Hospital'),
+        ('PRIVATE', 'Private Institution'),
+    ]
+
+    name = models.CharField(max_length=200, default="Ministry of Health - Kenya")
+    org_type = models.CharField(max_length=20, choices=ORG_TYPES, default='MINISTRY')
+    department = models.CharField(max_length=200, default="Department of Forensic Pathology")
+    address = models.TextField(blank=True, help_text="Official address")
+    phone = models.CharField(max_length=50, blank=True)
+    email = models.EmailField(blank=True)
+    website = models.URLField(blank=True)
+
+    # Branding
+    logo = models.ImageField(upload_to='logos/', blank=True, help_text="Organization logo")
+    primary_color = models.CharField(max_length=7, default="#2563eb", help_text="Hex color code")
+    secondary_color = models.CharField(max_length=7, default="#1e40af", help_text="Hex color code")
+
+    # Parent organization (for hospitals under ministry)
+    parent_org = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='child_orgs')
+
+    # Settings
+    report_footer = models.TextField(default="This is an official government document. Unauthorized reproduction is prohibited.")
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.get_org_type_display()})"
+
+    class Meta:
+        verbose_name = "Organization"
+        verbose_name_plural = "Organizations"
+
+    @property
+    def is_ministry(self):
+        return self.org_type == 'MINISTRY'
+
+    @property
+    def is_hospital(self):
+        return self.org_type == 'HOSPITAL'
+
 class CustomUser(AbstractUser):
     ROLES = (
-        ('ADMIN', 'Admin'),
-        ('POLICE', 'Police Officer'),
+        # Ministry Level
+        ('MINISTRY_ADMIN', 'Ministry Administrator'),
+        ('MINISTRY_SUPERVISOR', 'Ministry Supervisor'),
+
+        # Hospital Level
+        ('HOSPITAL_ADMIN', 'Hospital Administrator'),
         ('PATHOLOGIST', 'Pathologist'),
+        ('POLICE', 'Police Officer'),
+        ('LAB_TECH', 'Laboratory Technician'),
     )
+
     role = models.CharField(max_length=20, choices=ROLES, default='POLICE')
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='users')
+
+    # Additional fields
+    employee_id = models.CharField(max_length=20, blank=True, help_text="Employee/Staff ID")
+    phone = models.CharField(max_length=20, blank=True)
+    department = models.CharField(max_length=100, blank=True)
+
+    def __str__(self):
+        return f"{self.username} ({self.get_role_display()}) - {self.organization.name}"
+
+    @property
+    def is_ministry_level(self):
+        return self.role in ['MINISTRY_ADMIN', 'MINISTRY_SUPERVISOR']
+
+    @property
+    def is_hospital_level(self):
+        return self.role in ['HOSPITAL_ADMIN', 'PATHOLOGIST', 'POLICE', 'LAB_TECH']
+
+    @property
+    def can_manage_cases(self):
+        return self.role in ['MINISTRY_ADMIN', 'MINISTRY_SUPERVISOR', 'HOSPITAL_ADMIN', 'PATHOLOGIST']
+
+    @property
+    def can_manage_users(self):
+        return self.role in ['MINISTRY_ADMIN', 'HOSPITAL_ADMIN']
+
+    @property
+    def can_view_all_cases(self):
+        return self.is_ministry_level or (self.role == 'HOSPITAL_ADMIN')
 
 class AutopsyCase(models.Model):
     CASE_TYPES = [
@@ -37,6 +119,7 @@ class AutopsyCase(models.Model):
 
     # --- 1. HEADER INFO ---
     case_id = models.CharField(max_length=20, unique=True)
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='cases')
     case_type = models.CharField(max_length=10, choices=CASE_TYPES, default='NORMAL')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
     
@@ -66,8 +149,10 @@ class AutopsyCase(models.Model):
     external_injuries = models.TextField(blank=True, null=True) # Text summary
     body_map_data = models.JSONField(blank=True, null=True)     # Red dots coordinates
     
-    date_of_arrival = models.DateTimeField(auto_now_add=True)
+    date_of_arrival = models.DateTimeField(null=True, blank=True, help_text="When the body arrived at the morgue")
     qr_code_image = models.ImageField(upload_to='qr_codes/', blank=True)
+    # Flag to indicate a closed case was later reopened
+    reopened = models.BooleanField(default=False)
 
     def __str__(self):
         return f"{self.case_id} - {self.deceased_name}"
@@ -75,7 +160,22 @@ class AutopsyCase(models.Model):
     # --- QR CODE GENERATOR ---
     def save(self, *args, **kwargs):
         if not self.qr_code_image:
-            qr_data = f"CASE ID: {self.case_id}\nNAME: {self.deceased_name}"
+            # Build comprehensive summary for QR code
+            qr_data = f"""CASE ID: {self.case_id}
+NAME: {self.deceased_name}
+AGE: {self.age if self.age else 'N/A'}
+GENDER: {self.gender}
+DOB: {self.date_of_birth if self.date_of_birth else 'N/A'}
+TYPE: {self.case_type}
+STATUS: {self.status}
+OB#: {self.ob_number if self.ob_number else 'N/A'}
+STATION: {self.police_station if self.police_station else 'N/A'}
+OFFICER: {self.investigating_officer if self.investigating_officer else 'N/A'}
+PLACE: {self.place_of_death if self.place_of_death else 'N/A'}
+TIME: {self.time_of_death if self.time_of_death else 'N/A'}
+ID METHOD: {self.identification_method}
+ARRIVED: {self.date_of_arrival.strftime('%Y-%m-%d %H:%M') if self.date_of_arrival else 'N/A'}"""
+            
             qr = qrcode.make(qr_data)
             canvas = BytesIO()
             qr.save(canvas, format='PNG')

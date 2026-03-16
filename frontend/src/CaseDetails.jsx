@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import api from './api'
+import { useToasts } from './Toasts'
+import { setTheme as applyTheme } from './theme'
 import BodyMap from './BodyMap'
 import ConsentSection from './ConsentSection'
 import ObserversSection from './ObserversSection'
 import EvidencePhotos from './EvidencePhotos'
 import ChainOfCustody from './ChainOfCustody'
+import QRCodeModal from './QRCodeModal'
 
 function CaseDetails({ role }) {
     const { id } = useParams()
@@ -20,10 +23,12 @@ function CaseDetails({ role }) {
     }
     const [theme, setTheme] = useState(getInitialTheme())
 
+    useEffect(() => { applyTheme(theme) }, [])
+
     const toggleTheme = () => {
         const newTheme = theme === 'light' ? 'dark' : 'light'
         setTheme(newTheme)
-        localStorage.setItem('theme', newTheme)
+        applyTheme(newTheme)
     }
 
     // --- 2. PALETTES ---
@@ -93,6 +98,8 @@ function CaseDetails({ role }) {
     const [pathologists, setPathologists] = useState([])
     const [assignment, setAssignment] = useState({ assignee_id: null, assignee_username: null })
 
+    const { addToast, confirm } = useToasts()
+
     // --- FETCH DATA ---
     useEffect(() => {
         const fetchData = async () => {
@@ -114,12 +121,13 @@ function CaseDetails({ role }) {
                     setReportData(reportRes.data)
                     const cassRes = await api.get(`reports/${id}/cassettes/`)
                     setCassettes(cassRes.data)
-                } catch {
+                } catch (e) {
                     console.log("No existing report found. Defaults will be used.")
                 }
                 setLoading(false)
             } catch (err) {
                 console.error(err)
+                addToast('Failed to load case data', { type: 'error' })
                 setLoading(false)
             }
         }
@@ -133,18 +141,18 @@ function CaseDetails({ role }) {
     }
 
     const saveCaseDetails = () => {
-        if (!canEdit) return alert('Permission denied.')
+        if (!canEdit) return addToast('Permission denied.', { type: 'error' })
         const sanitize = (data) => {
-            const numericFields = ['age']; const dateFields = ['date_of_birth', 'time_of_death']
+            const numericFields = ['age']; const dateFields = ['date_of_birth', 'time_of_death', 'date_of_arrival']
             const clean = { ...data }
             numericFields.forEach(f => { if (clean[f] === '') clean[f] = null })
             dateFields.forEach(f => { if (clean[f] === '') clean[f] = null })
-            delete clean.qr_code_image; delete clean.date_of_arrival; delete clean.assigned_pathologist_name
+            delete clean.qr_code_image; delete clean.assigned_pathologist_name
             return clean
         }
         api.patch(`cases/${id}/`, sanitize(caseData))
-            .then(() => alert('Details Updated'))
-            .catch(err => alert('Error: ' + JSON.stringify(err.response?.data)))
+            .then(() => addToast('Details Updated', { type: 'success' }))
+            .catch(err => addToast('Error: ' + JSON.stringify(err.response?.data), { type: 'error' }))
     }
 
     const handleReportChange = (e) => {
@@ -153,7 +161,7 @@ function CaseDetails({ role }) {
     }
 
     const saveReportData = () => {
-        if (!canEdit) return alert('Permission denied.')
+        if (!canEdit) return addToast('Permission denied.', { type: 'error' })
         const sanitize = (data) => {
             const numericFields = ['height_cm', 'weight_kg', 'bmi', 'brain_weight', 'heart_weight', 'lung_right_weight', 'lung_left_weight', 'liver_weight', 'spleen_weight', 'kidney_right_weight', 'kidney_left_weight']
             const clean = { ...data }
@@ -162,17 +170,18 @@ function CaseDetails({ role }) {
         }
         const payload = sanitize(reportData)
         api.patch(`reports/${id}/`, payload)
-            .then(() => alert('Draft Saved'))
+            .then(() => addToast('Draft Saved', { type: 'success' }))
             .catch((err) => {
                 if(err.response?.status === 404) {
-                    api.post('reports/', { ...payload, case_id: id }).then(() => alert('Report Created'))
-                } else { alert('Error: ' + JSON.stringify(err.response?.data)) }
+                    api.post('reports/', { ...payload, case_id: id }).then(() => addToast('Report Created', { type: 'success' }))
+                } else { addToast('Error: ' + JSON.stringify(err.response?.data), { type: 'error' }) }
             })
     }
 
-    const handleFinalizeCase = () => {
-        if (!canEdit) return alert('Permission denied.')
-        if (!window.confirm("Finalize Case and Lock Status?")) return;
+    const handleFinalizeCase = async () => {
+        if (!canEdit) return addToast('Permission denied.', { type: 'error' })
+        const ok = await confirm('Finalize Case and Lock Status?')
+        if (!ok) return
         const sanitize = (data) => {
             const numericFields = ['height_cm', 'weight_kg', 'bmi', 'brain_weight', 'heart_weight', 'lung_right_weight', 'lung_left_weight', 'liver_weight', 'spleen_weight', 'kidney_right_weight', 'kidney_left_weight']
             const clean = { ...data }
@@ -192,7 +201,7 @@ function CaseDetails({ role }) {
                 const link = document.createElement('a'); link.href = url; link.setAttribute('download', `Report_${id}.pdf`);
                 document.body.appendChild(link); link.click(); link.remove();
             })
-            .catch(err => alert("Error: " + err.message))
+                    .catch(err => addToast("Error: " + err.message, { type: 'error' }))
             .finally(() => navigate('/'))
     }
 
@@ -201,11 +210,25 @@ function CaseDetails({ role }) {
         if(!newCassette.cassette_id) return
         api.post(`reports/${id}/cassettes/`, newCassette)
             .then(res => { setCassettes([...cassettes, res.data]); setNewCassette({cassette_id:'', tissue_type:''}) })
-            .catch(() => alert("Save draft first."))
+            .catch(() => addToast("Save draft first.", { type: 'error' }))
     }
     const deleteCassette = (cid) => {
         if (!canEdit) return
         api.delete(`reports/${id}/cassettes/${cid}/`).then(() => setCassettes(cassettes.filter(c => c.id !== cid)))
+    }
+
+    const handleReopenCase = async () => {
+        if (!canEdit) return addToast('Permission denied.', { type: 'error' })
+        const ok = await confirm('Reopen this case and set status to PENDING?')
+        if (!ok) return
+        try {
+            const res = await api.patch(`cases/${id}/`, { status: 'PENDING', reopened: true })
+            setCaseData(res.data)
+            addToast('Case reopened and set to PENDING', { type: 'success' })
+        } catch (err) {
+            console.error(err)
+            addToast('Failed to reopen case', { type: 'error' })
+        }
     }
 
     if (loading) return <div style={{padding:'50px', textAlign:'center', color: colors.textMuted}}>Loading Case File...</div>
@@ -268,9 +291,12 @@ function CaseDetails({ role }) {
                 <div style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
                     <button onClick={() => navigate('/')} style={{...styles.btn('secondary'), border: `1px solid ${colors.cardBorder}`}}>← Back</button>
                     <div>
-                        <div style={{display:'flex', alignItems:'center'}}>
+                        <div style={{display:'flex', alignItems:'center', gap: '12px'}}>
                             <h1 style={styles.title}>{caseData.deceased_name}</h1>
                             <span style={styles.badge(caseData.status)}>{caseData.status}</span>
+                            {caseData.reopened && (
+                                <span style={{padding:'6px 10px', borderRadius:8, background: theme === 'dark' ? 'rgba(250,204,21,0.12)' : '#fff7ed', color: theme === 'dark' ? '#fbbf24' : '#92400e', fontWeight:700}}>Reopened</span>
+                            )}
                         </div>
                         <div style={{color: colors.textMuted, fontSize:'0.9rem', marginTop:'5px'}}>Case ID: <strong style={{color: colors.primary}}>{caseData.case_id}</strong></div>
                     </div>
@@ -282,10 +308,12 @@ function CaseDetails({ role }) {
                         {theme === 'light' ? '🌙' : '☀️'}
                     </button>
 
+                    {caseData.status === 'COMPLETE' && canEdit && (
+                        <button onClick={handleReopenCase} style={{...styles.btn('secondary'), padding:'8px 12px'}}>🔁 Reopen Case</button>
+                    )}
+
                     {caseData.qr_code_image && (
-                        <div style={{ textAlign: 'center', background: 'white', padding: '5px', borderRadius: '8px', border: `1px solid ${colors.cardBorder}` }}>
-                            <img src={caseData.qr_code_image.startsWith('http') ? caseData.qr_code_image : `http://127.0.0.1:8000${caseData.qr_code_image}`} alt="QR" style={{width: 60, height: 60}} />
-                        </div>
+                        <QRCodeModal qrCodeUrl={caseData.qr_code_image} caseId={caseData.case_id} colors={colors} />
                     )}
                 </div>
             </div>
@@ -317,7 +345,17 @@ function CaseDetails({ role }) {
                                     <div><label style={styles.label}>Age</label><input style={{...styles.input, opacity: 0.7}} value={caseData.age || ''} disabled /></div>
                                     <div><label style={styles.label}>Gender</label><input style={{...styles.input, opacity: 0.7}} value={caseData.gender} disabled /></div>
                                     <div><label style={styles.label}>Race</label><input name="race" style={styles.input} value={caseData.race || ''} onChange={handleCaseChange} placeholder="e.g. African" disabled={!canEdit} /></div>
-                                    <div style={{gridColumn: 'span 2'}}><label style={styles.label}>ID Method</label><input style={{...styles.input, opacity: 0.7}} value={caseData.identification_method} disabled /></div>
+                                    <div style={{gridColumn: 'span 2'}}>
+                                        <label style={styles.label}>ID Method</label>
+                                        <select name="identification_method" value={caseData.identification_method || ''} onChange={handleCaseChange} style={styles.input} disabled={!canEdit}>
+                                            <option value="VISUAL">Visual</option>
+                                            <option value="ID_CARD">ID Document</option>
+                                            <option value="FINGERPRINT">Fingerprint</option>
+                                            <option value="DNA">DNA</option>
+                                            <option value="DENTAL">Dental Records</option>
+                                            <option value="UNKNOWN">Unknown</option>
+                                        </select>
+                                    </div>
                                 </div>
                             </div>
 
@@ -338,6 +376,10 @@ function CaseDetails({ role }) {
                                 <div style={{ marginBottom: '20px' }}>
                                     <label style={styles.label}>Time of Death</label>
                                     <input type="datetime-local" name="time_of_death" value={caseData.time_of_death ? caseData.time_of_death.slice(0,16) : ''} onChange={handleCaseChange} style={styles.input} disabled={!canEdit} />
+                                </div>
+                                <div style={{ marginBottom: '20px' }}>
+                                    <label style={styles.label}>Date of Arrival at Morgue</label>
+                                    <input type="datetime-local" name="date_of_arrival" value={caseData.date_of_arrival ? caseData.date_of_arrival.slice(0,16) : ''} onChange={handleCaseChange} style={styles.input} disabled={!canEdit} />
                                 </div>
                                 <div style={{ marginBottom: '20px' }}>
                                     <label style={styles.label}>Place of Death</label>
@@ -470,10 +512,7 @@ function CaseDetails({ role }) {
                 {/* 4. TOXICOLOGY & CONCLUSION */}
                 {activeTab === 'toxicology' && (
                     <div>
-                        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: '20px'}}>
-                            <h2 style={styles.sectionHeader}>Conclusion</h2>
-                            {canEdit && <button onClick={handleFinalizeCase} style={styles.btn('success')}>✅ Finalize Case & Generate PDF</button>}
-                        </div>
+                        <h2 style={styles.sectionHeader}>Conclusion</h2>
                         
                         <div style={styles.card}>
                             <h4 style={{...styles.subHeader, marginBottom:'20px'}}>Labs & Toxicology</h4>
@@ -526,7 +565,10 @@ function CaseDetails({ role }) {
                 {/* EXTRAS */}
                 {activeTab === 'extras' && (
                     <div>
-                        <h2 style={styles.sectionHeader}>Extras</h2>
+                        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: '20px'}}>
+                            <h2 style={styles.sectionHeader}>Extras</h2>
+                            {canEdit && <button onClick={handleFinalizeCase} style={styles.btn('success')}>✅ Finalize Case & Generate PDF</button>}
+                        </div>
                         <div style={{display:'grid', gap:'25px'}}>
                             <div style={styles.card}>
                                 <h4 style={styles.subHeader}>Consent & Authorization</h4>

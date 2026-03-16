@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
 import api from './api'
+import { useToasts } from './Toasts'
 
 export default function ChainOfCustody({ caseId, canEdit, colors }){
+  const { addToast, confirm } = useToasts()
   const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(true)
   const [eventType, setEventType] = useState('TRANSFER')
@@ -17,25 +19,26 @@ export default function ChainOfCustody({ caseId, canEdit, colors }){
   },[caseId])
 
   const add = async ()=>{
-    if(!canEdit) return alert('No permission')
-    if(!notes.trim()) return alert('Please enter a description or name.')
+    if(!canEdit) return addToast('No permission', { type: 'error' })
+    if(!notes.trim()) return addToast('Please enter a description or name.', { type: 'error' })
     try{
       const payload = { case: caseId, event_type: eventType, notes }
       const res = await api.post('chain/', payload)
       setEvents(prev => [res.data, ...prev])
       setNotes('')
-    } catch(err){ console.error(err); alert('Failed to add event') }
+    } catch(err){ console.error(err); addToast('Failed to add event', { type: 'error' }) }
   }
 
   const remove = async (id) => {
-      if(!canEdit) return
-      if(!window.confirm("Delete this log entry?")) return
+      if(!canEdit) return addToast('No permission', { type: 'error' })
+      const ok = await confirm('Delete this log entry?')
+      if(!ok) return
       try {
-          await api.delete(`chain/${id}/`)
-          setEvents(prev => prev.filter(e => e.id !== id))
+        await api.delete(`chain/${id}/`)
+        setEvents(prev => prev.filter(e => e.id !== id))
       } catch(err) {
-          console.error(err)
-          alert("Failed to delete event")
+        console.error(err)
+        addToast("Failed to delete event", { type: 'error' })
       }
   }
 

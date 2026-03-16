@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useToasts } from './Toasts'
 
 // 2. Injury Palette (moved outside component to avoid recreation)
 const injuryTypes = {
@@ -11,6 +12,7 @@ const injuryTypes = {
 }
 
 function BodyMap({ existingData, gender, age, onSave, canEdit = true }) {
+    const { addToast, confirm, prompt } = useToasts()
     // 1. All Possible Diagrams
     const allDiagrams = {
         MALE: '/diagrams/male.png',
@@ -92,7 +94,7 @@ function BodyMap({ existingData, gender, age, onSave, canEdit = true }) {
     }
 
     // --- CLICK HANDLER ---
-    const handleMapClick = (e) => {
+    const handleMapClick = async (e) => {
         if (!canEdit) return
         const rect = e.target.getBoundingClientRect()
         const xInBox = e.clientX - rect.left
@@ -108,9 +110,9 @@ function BodyMap({ existingData, gender, age, onSave, canEdit = true }) {
         const yPercent = ((yInBox - imageBounds.offsetY) / imageBounds.actualHeight) * 100
         
         const tool = injuryTypes[selectedTool]
-        const details = window.prompt(`Describe this ${tool.label}:`)
+        const details = await prompt(`Describe this ${tool.label}:`, { default: '' })
         
-        if (details !== null) { 
+        if (details !== null) {
             setMarkers([...markers, { 
                 x: xPercent, 
                 y: yPercent, 
@@ -124,8 +126,8 @@ function BodyMap({ existingData, gender, age, onSave, canEdit = true }) {
 
     // --- CORRECTION TOOLS ---
     const undoLast = () => { if (markers.length > 0) setMarkers(markers.slice(0, -1)) }
-    const clearAll = () => { if (window.confirm("Clear ALL injuries?")) setMarkers([]) }
-    const removeSpecific = (index) => { if(window.confirm("Remove injury?")) setMarkers(markers.filter((_, i) => i !== index)) }
+    const clearAll = async () => { const ok = await confirm('Clear ALL injuries?'); if(ok) setMarkers([]) }
+    const removeSpecific = async (index) => { const ok = await confirm('Remove injury?'); if(ok) setMarkers(markers.filter((_, i) => i !== index)) }
 
     return (
         <div style={{ textAlign: 'center' }}>
@@ -197,7 +199,7 @@ function BodyMap({ existingData, gender, age, onSave, canEdit = true }) {
                     const txt = markers.map((m, i) => `${i+1}. [${m.view}] ${injuryTypes[m.type]?.label || m.type}: ${m.description}`).join('\n')
                     const json = markers
                     onSave(txt, json)
-                    alert('Body map injuries saved!')
+                    addToast('Body map injuries saved!', { type: 'success' })
                     }} style={{marginTop:'10px', background:'#007bff', color:'white', border:'none', padding:'8px 16px', borderRadius:'4px', cursor:'pointer'}}>💾 Save Injuries</button>
                 )}
                 {!canEdit && <div style={{marginTop:'10px', color:'#666', fontStyle:'italic'}}>You do not have permission to modify the body map.</div>}

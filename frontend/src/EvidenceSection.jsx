@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import api from './api'
+import { useToasts } from './Toasts'
 
 function EvidenceSection({ caseId, evidenceList, onEvidenceAdded }) {
     const [newItem, setNewItem] = useState('')
+    const { addToast } = useToasts()
     const canEdit = role === 'PATHOLOGIST' || role === 'ADMIN'
 
     const handleAddEvidence = async (e) => {
@@ -19,7 +21,7 @@ function EvidenceSection({ caseId, evidenceList, onEvidenceAdded }) {
             onEvidenceAdded() 
         } catch (error) {
             console.error("Error adding evidence:", error)
-            alert("Failed to add evidence")
+            addToast("Failed to add evidence", { type: 'error' })
         }
     }
 
